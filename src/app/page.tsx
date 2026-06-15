@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Overzicht, PeriodeUit, DienstUit } from "@/lib/overview";
+import type { Overzicht, PeriodeUit, DienstUit, Tarieven } from "@/lib/overview";
 
 const TOKEN_KEY = "loon_token";
 
@@ -125,6 +125,7 @@ export default function Page() {
 
       {overzicht && (
         <div className="space-y-6">
+          <TarievenKaart t={overzicht.tarieven} />
           {huidige && <HuidigeKaart p={huidige} />}
 
           {toekomst.length > 0 && (
@@ -138,7 +139,7 @@ export default function Page() {
           {verleden.length > 0 && (
             <Sectie titel="Afgelopen periodes">
               {verleden.map((p) => (
-                <PeriodeKaart key={p.index} p={p} />
+                <PeriodeKaart key={p.index} p={p} perWeek />
               ))}
             </Sectie>
           )}
@@ -209,7 +210,42 @@ function Stat({ label, waarde }: { label: string; waarde: string }) {
   );
 }
 
-function PeriodeKaart({ p, voorspelling }: { p: PeriodeUit; voorspelling?: boolean }) {
+function TarievenKaart({ t }: { t: Tarieven }) {
+  return (
+    <section className="rounded-2xl bg-white p-4 shadow-sm">
+      <div className="mb-2 text-sm font-semibold text-slate-700">Uurloon (basis + toeslag)</div>
+      <div className="grid grid-cols-3 gap-2 text-center">
+        <Tarief label="Basis" waarde={t.uurloon} />
+        <Tarief label="Zondag" waarde={t.zondag} sub="+50%" />
+        <Tarief label="Feestdag" waarde={t.feestdag} sub="+100%" />
+      </div>
+
+      <div className="mb-2 mt-4 text-sm font-semibold text-ah-dark">
+        All-in per uur{" "}
+        <span className="font-normal text-slate-400">incl. personeelstoeslag, vakantiegeld &amp; ATV</span>
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-center">
+        <Tarief label="Normaal" waarde={t.allIn} accent />
+        <Tarief label="Zondag" waarde={t.allInZondag} accent />
+        <Tarief label="Feestdag" waarde={t.allInFeestdag} accent />
+      </div>
+    </section>
+  );
+}
+
+function Tarief({ label, waarde, sub, accent }: { label: string; waarde: number; sub?: string; accent?: boolean }) {
+  return (
+    <div className={`rounded-lg py-2 ${accent ? "bg-ah-light" : "bg-slate-50"}`}>
+      <div className={`text-base font-bold ${accent ? "text-ah-blue" : "text-slate-800"}`}>{euro(waarde)}</div>
+      <div className="text-[11px] font-medium text-slate-500">
+        {label}
+        {sub && <span className="text-slate-400"> {sub}</span>}
+      </div>
+    </div>
+  );
+}
+
+function PeriodeKaart({ p, voorspelling, perWeek }: { p: PeriodeUit; voorspelling?: boolean; perWeek?: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
@@ -228,11 +264,27 @@ function PeriodeKaart({ p, voorspelling }: { p: PeriodeUit; voorspelling?: boole
         </div>
       </button>
       {open && (
-        <div className="space-y-2 border-t border-slate-100 bg-slate-50 p-3">
+        <div className="space-y-3 border-t border-slate-100 bg-slate-50 p-3">
           {p.diensten.length === 0 && <div className="text-sm text-slate-400">Nog geen diensten.</div>}
-          {p.diensten.map((d) => (
-            <DienstRij key={d.uid} d={d} />
-          ))}
+          {perWeek
+            ? p.weken.map((w) => (
+                <div key={`${w.jaar}-${w.weeknummer}`} className="space-y-2">
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Week {w.weeknummer}
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      {uren(w.uren)} · <span className="font-semibold text-slate-700">{euro(w.bruto)}</span>
+                    </span>
+                  </div>
+                  {w.diensten.map((d) => (
+                    <DienstRij key={d.uid} d={d} />
+                  ))}
+                </div>
+              ))
+            : p.diensten.map((d) => (
+                <DienstRij key={d.uid} d={d} />
+              ))}
         </div>
       )}
     </div>
