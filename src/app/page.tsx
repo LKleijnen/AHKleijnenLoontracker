@@ -199,13 +199,7 @@ function Onboarding({ onKlaar }: { onKlaar: (i: Instellingen) => void }) {
         {stap === 1 && (
           <div className="space-y-3">
             <label className="block text-sm font-semibold text-slate-700">Wat is je geboortedatum?</label>
-            <input
-              type="date"
-              autoFocus
-              value={gebISO}
-              onChange={(e) => setGebISO(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-ah-blue"
-            />
+            <GeboortedatumKiezer initieelISO={gebISO} onChange={setGebISO} />
             <p className="text-xs leading-relaxed text-slate-500">
               Hiermee bepalen we je uurloon: tot 21 jaar het jeugdloon, daarna het volwassen loon.
               Je gegevens blijven alleen in je eigen browser staan.
@@ -303,6 +297,75 @@ function StapBalk({ huidig, totaal }: { huidig: number; totaal: number }) {
   );
 }
 
+const MAANDEN = [
+  "januari", "februari", "maart", "april", "mei", "juni",
+  "juli", "augustus", "september", "oktober", "november", "december",
+];
+
+/**
+ * Geboortedatum via drie losse, ondubbelzinnige velden (dag / maand-naam / jaar).
+ * Voorkomt de verwarring van het standaard datumveld (waar 16 in het maandvak
+ * naar 12 klapt). Geeft een geldige "YYYY-MM-DD" door, of "" als nog onvolledig.
+ */
+function GeboortedatumKiezer({ initieelISO, onChange }: { initieelISO: string; onChange: (iso: string) => void }) {
+  const init = naarGeboortedatum(initieelISO);
+  const [dag, setDag] = useState(init ? String(init.dag) : "");
+  const [maand, setMaand] = useState(init ? String(init.maand) : "");
+  const [jaar, setJaar] = useState(init ? String(init.jaar) : "");
+
+  function update(d: string, m: string, j: string) {
+    setDag(d);
+    setMaand(m);
+    setJaar(j);
+    const dn = +d, mn = +m, jn = +j;
+    const geldig =
+      d !== "" && m !== "" && j !== "" &&
+      dn >= 1 && dn <= 31 && mn >= 1 && mn <= 12 && jn >= 1940 && jn <= 2030;
+    onChange(geldig ? `${jn}-${String(mn).padStart(2, "0")}-${String(dn).padStart(2, "0")}` : "");
+  }
+
+  const veld = "w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-ah-blue";
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      <div>
+        <label className="mb-1 block text-[11px] font-medium text-slate-500">Dag</label>
+        <input
+          type="number"
+          min={1}
+          max={31}
+          inputMode="numeric"
+          placeholder="16"
+          value={dag}
+          onChange={(e) => update(e.target.value, maand, jaar)}
+          className={veld}
+        />
+      </div>
+      <div>
+        <label className="mb-1 block text-[11px] font-medium text-slate-500">Maand</label>
+        <select value={maand} onChange={(e) => update(dag, e.target.value, jaar)} className={veld}>
+          <option value="">—</option>
+          {MAANDEN.map((nm, i) => (
+            <option key={i} value={i + 1}>{nm}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="mb-1 block text-[11px] font-medium text-slate-500">Jaar</label>
+        <input
+          type="number"
+          min={1940}
+          max={2030}
+          inputMode="numeric"
+          placeholder="2006"
+          value={jaar}
+          onChange={(e) => update(dag, maand, e.target.value)}
+          className={veld}
+        />
+      </div>
+    </div>
+  );
+}
+
 function SchaalKiezer({ waarde, onKies }: { waarde: Schaal | ""; onKies: (s: Schaal) => void }) {
   return (
     <div className="grid grid-cols-3 gap-2">
@@ -390,12 +453,7 @@ function InstellingenModal({
 
         <div className="space-y-1">
           <label className="block text-sm font-semibold text-slate-700">Geboortedatum</label>
-          <input
-            type="date"
-            value={gebISO}
-            onChange={(e) => setGebISO(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-ah-blue"
-          />
+          <GeboortedatumKiezer initieelISO={gebISO} onChange={setGebISO} />
         </div>
 
         <div className="space-y-1">
