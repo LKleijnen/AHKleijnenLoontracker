@@ -1,11 +1,17 @@
 # AH Loontracker
 
-Persoonlijke webapp die je AH-salaris berekent, voorspelt en uitsplitst op basis
-van je rooster-iCal en de loon-opbouw van je loonstrook. Bruto, alle toeslagen
-over het basisloon. Geen handmatig uren invullen.
+Webapp die je AH-salaris berekent, voorspelt en uitsplitst op basis van je
+rooster-iCal en de **CAO Levensmiddelenbedrijf (LMB)** — de CAO voor
+franchise- en zelfstandige supermarkten. Bruto, alle toeslagen over het
+basisloon. Geen handmatig uren invullen, geen login.
+
+Bedoeld voor iedereen die in de winkel werkt: je vult éénmalig je gegevens in
+(geboortedatum, loonschaal, iCal-link), die alleen in je eigen browser blijven.
 
 ## Wat het doet
 
+- **Onboarding in 3 stappen** bij het eerste bezoek: geboortedatum → loonschaal
+  (+ functiejaren vanaf 21 jr) → iCal-link, met uitleg per stap.
 - Haalt je rooster **live** uit de personeelstool-iCal (server-side, geen CORS-gedoe).
 - Rekent per dienst het bruto loon uit met volledige, **uitklapbare opbouw**:
   basisloon, personeelstoeslag, zondag-/feestdag-/avondtoeslag, vakantietoeslag,
@@ -13,36 +19,27 @@ over het basisloon. Geen handmatig uren invullen.
 - Toont per **4-weken-periode**: opgebouwd tot nu, verwacht eindtotaal en de
   datum waarop het op je rekening komt (loon volgt ~1 periode later).
 - Voorspelt komende periodes uit je ingeplande diensten.
-- Login met één wachtwoord; je blijft ingelogd (token in localStorage).
 
-De loon-formules reproduceren je echte loonstroken **tot op de cent**
-(`npm run validate`).
+Het uurloon komt uit de officiële LMB-loontabel **per 1 januari 2026** (schaal
+A/B/C). Geverifieerd tegen echte loonstroken: schaal C 19 jr = €10,49, 20 jr =
+€11,79 — klopt tot op de cent (`npm run validate`).
+
+## Loonschalen (LMB)
+
+| Schaal | Voorbeeldfunctie |
+|---|---|
+| A | vakkenvuller |
+| B | kassasluiter |
+| C | teamleider |
+
+Tot 21 jaar geldt het jeugdloon (op leeftijd); vanaf 21 jaar telt het
+functiejaar mee (0–5, schaal A heeft alleen 0/1).
 
 ## Lokaal draaien
 
 ```bash
 npm install
-cp .env.example .env.local   # en vul de waarden in (zie hieronder)
-npm run dev                  # http://localhost:3000
-```
-
-### .env.local
-
-```
-ICAL_URL=https://ahvalkenburg.personeelstool.nl/getCalendar?hash=...
-APP_PASSWORD=jouw-wachtwoord
-AUTH_SECRET=<willekeurige sleutel>
-```
-
-Genereer een `AUTH_SECRET`:
-
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
-
-> Het standaardwachtwoord in `.env.local` is nu `verander-mij` — pas dit aan.
-> `.env.local`, je loonstroken (`*.pdf`) en het opgehaalde rooster (`data/`)
-> staan in `.gitignore` en komen dus **niet** in GitHub.
+npm run dev    # http://localhost:3000
 
 ### Controleren of de berekening klopt
 
@@ -50,34 +47,26 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 npm run validate
 ```
 
-## Online zetten (Vercel, gratis)
-
-1. Push deze map naar een **(privé) GitHub-repo**.
-2. Ga naar [vercel.com](https://vercel.com), "Add New… → Project", importeer de repo.
-3. Zet bij **Environment Variables** dezelfde drie variabelen
-   (`ICAL_URL`, `APP_PASSWORD`, `AUTH_SECRET`).
-4. Deploy. Je app is daarna op je telefoon én laptop bereikbaar op dezelfde URL —
-   alles is identiek omdat de data live uit de iCal komt (geen database nodig).
-
 ## Loon aanpassen
 
-Alle loon-waarden staan ingebakken in [`src/lib/config.ts`](src/lib/config.ts).
-Verandert je uurloon (verjaardag of CAO-verhoging)? Voeg een regel toe aan
-`UURLOON_PER_LEEFTIJD`. Toeslag-percentages staan in `TOESLAGEN`.
+De loontabel staat in [`src/lib/config.ts`](src/lib/config.ts) (`LOONTABEL_2026`).
+Bij een nieuwe CAO-verhoging: vervang de bedragen door de nieuwe gepubliceerde
+tabel (zelf %-verhogingen narekenen kan een cent afwijken door CAO-afronding).
+Toeslag-percentages staan in `TOESLAGEN`.
 
 ## Hoe het in elkaar zit
 
 | Bestand | Functie |
 |---|---|
-| `src/lib/config.ts` | Ingebakken loon-waarden (uurloon, toeslagen) |
-| `src/lib/pay.ts` | Reken-engine (uren → bruto met opbouw) |
+| `src/lib/config.ts` | CAO-loontabel (A/B/C) + toeslagen |
+| `src/lib/pay.ts` | Reken-engine (uren + loongegevens → bruto met opbouw) |
 | `src/lib/periods.ts` | 4-weken periodekalender + uitbetaaldatum |
 | `src/lib/holidays.ts` | Nederlandse feestdagen (+100%) |
 | `src/lib/ical.ts` | Rooster-iCal parser |
 | `src/lib/overview.ts` | Bouwt het overzicht voor de UI |
-| `src/lib/auth.ts` | Login met één wachtwoord |
-| `src/app/api/*` | API: `/api/login`, `/api/rooster` |
-| `src/app/page.tsx` | Het dashboard |
+| `src/lib/types.ts` | Types (Dienst, Loongegevens, Instellingen, …) |
+| `src/app/api/rooster` | API: haalt iCal op (per gebruiker, POST) en rekent |
+| `src/app/page.tsx` | Onboarding-wizard + dashboard |
 | `scripts/validate.ts` | Bewijst dat de engine de loonstroken reproduceert |
 
 ## Nog te bevestigen / aannames
@@ -88,10 +77,10 @@ Verandert je uurloon (verjaardag of CAO-verhoging)? Voeg een regel toe aan
   Hemelvaartsdag, beide Pinksterdagen, beide Kerstdagen, en Bevrijdingsdag
   alleen in lustrumjaren (2025, 2030, …). Een feestdag op zondag
   (1e Paas-/Pinksterdag) wint van de zondagtoeslag.
-- **Uurloon 21+**: nog niet bekend;
+- **Toeslagen** (personeelstoeslag €2/u, ORT, vakantiegeld, vakantiedagen, ATV)
+  zijn gelijk verondersteld voor alle medewerkers onder deze CAO.
 
 ## Later (Fase 2)
 
-Geschiedenis voorspeld-vs-werkelijk, netto-schatting, en multi-user zodat
-collega's het ook kunnen gebruiken 
-Gescheidenis gewerkte dagen opslaan (dan komt er een database bij).
+Geschiedenis voorspeld-vs-werkelijk, netto-schatting, gewerkte dagen opslaan
+(dan komt er een database bij).

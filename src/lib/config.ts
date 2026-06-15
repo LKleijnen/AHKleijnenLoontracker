@@ -1,17 +1,39 @@
 /**
- * Loon-configuratie afgeleid uit de loonstroken (periode 7: €10,49 / 19 jr,
- * periode 8: €11,79 / 20 jr). Alle waarden kloppen tot op de cent.
+ * Loon-configuratie op basis van de CAO Levensmiddelenbedrijf (LMB) — de CAO
+ * voor franchise- en zelfstandige supermarkten (o.a. AH-franchise).
+ *
+ * De loontabel is per 1 januari 2026 en geverifieerd tegen echte loonstroken:
+ * schaal C 19 jr = €10,49 en 20 jr = €11,79 (klopt op de cent). De toeslagen
+ * (personeelstoeslag, ORT, vakantiegeld, ATV) gelden voor iedereen onder deze CAO.
  */
 
-export const PROFILE = {
-  geboortedatum: { jaar: 2006, maand: 5, dag: 16 }, // 16 mei 2006
+export type Schaal = "A" | "B" | "C";
+
+export const SCHAAL_INFO: Record<Schaal, { voorbeeld: string }> = {
+  A: { voorbeeld: "bijv. vakkenvuller" },
+  B: { voorbeeld: "bijv. kassasluiter" },
+  C: { voorbeeld: "bijv. teamleider" },
 };
 
-/** Bruto uurloon per leeftijd (schaal C, CAO Levensmiddelenbedrijf). */
-export const UURLOON_PER_LEEFTIJD: Record<number, number> = {
-  19: 10.49,
-  20: 11.79,
-  // 21+ nog niet bekend
+/**
+ * Bruto uurloon per 1 januari 2026 (CAO LMB, Bijlage 2 Loonschalen).
+ * - `jeugd`: uurloon op leeftijd 15 t/m 20 (jeugdloon; functiejaren tellen niet mee).
+ * - `vanaf21`: uurloon vanaf 21 jaar, geïndexeerd op functiejaar (index 0 = startjaar).
+ *   Schaal A kent maar één periodiek (fj 0 en 1 gelijk), B en C lopen door t/m fj 5.
+ */
+export const LOONTABEL_2026: Record<Schaal, { jeugd: Record<number, number>; vanaf21: number[] }> = {
+  A: {
+    jeugd: { 15: 4.67, 16: 5.38, 17: 6.16, 18: 7.26, 19: 8.71, 20: 11.61 },
+    vanaf21: [14.51, 14.51],
+  },
+  B: {
+    jeugd: { 16: 6.57, 17: 7.38, 18: 7.98, 19: 8.86, 20: 11.61 },
+    vanaf21: [14.51, 15.50, 15.72, 15.94, 16.16, 16.60],
+  },
+  C: {
+    jeugd: { 18: 9.48, 19: 10.49, 20: 11.79 },
+    vanaf21: [14.73, 16.23, 16.50, 16.78, 17.05, 17.59],
+  },
 };
 
 export const TOESLAGEN = {

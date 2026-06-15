@@ -2,9 +2,9 @@
  * Reken-engine: zet uren + uurloon om in bruto-loon met volledige opbouw.
  * Reproduceert de loonstroken exact (zie scripts/validate.ts).
  */
-import { PROFILE, UURLOON_PER_LEEFTIJD, TOESLAGEN, OVERIG } from "./config";
+import { LOONTABEL_2026, TOESLAGEN, OVERIG } from "./config";
 import { feestdagNaam } from "./holidays";
-import type { Dienst, DienstLoon, LoonRegel, BrutoInvoer } from "./types";
+import type { Dienst, DienstLoon, LoonRegel, BrutoInvoer, Geboortedatum, Loongegevens } from "./types";
 
 const MS_UUR = 3600000;
 
@@ -12,8 +12,8 @@ function round2(x: number): number {
   return Math.round((x + Number.EPSILON) * 100) / 100;
 }
 
-export function leeftijdOp(datum: Date): number {
-  const { jaar, maand, dag } = PROFILE.geboortedatum;
+export function leeftijdOp(datum: Date, geboortedatum: Geboortedatum): number {
+  const { jaar, maand, dag } = geboortedatum;
   let leeftijd = datum.getFullYear() - jaar;
   const voorVerjaardag =
     datum.getMonth() + 1 < maand ||
@@ -22,14 +22,27 @@ export function leeftijdOp(datum: Date): number {
   return leeftijd;
 }
 
-/** Uurloon op een datum (leeftijdsafhankelijk). Valt terug op dichtstbijzijnde bekende leeftijd. */
-export function uurloonVoorDatum(datum: Date): number {
-  const leeftijd = leeftijdOp(datum);
-  if (UURLOON_PER_LEEFTIJD[leeftijd] != null) return UURLOON_PER_LEEFTIJD[leeftijd];
-  const bekend = Object.keys(UURLOON_PER_LEEFTIJD).map(Number).sort((a, b) => a - b);
-  const lager = bekend.filter((l) => l <= leeftijd);
-  if (lager.length) return UURLOON_PER_LEEFTIJD[lager[lager.length - 1]];
-  return UURLOON_PER_LEEFTIJD[bekend[0]];
+/**
+ * Uurloon op een datum volgens de CAO-tabel, op basis van schaal, leeftijd en
+ * functiejaren. Onder 21 telt de leeftijd (jeugdloon, functiejaren genegeerd);
+ * vanaf 21 telt het functiejaar. Valt terug op de dichtstbijzijnde bekende
+ * jeugdleeftijd binnen de schaal als een leeftijd niet in de tabel staat.
+ */
+export function uurloonVoorDatum(datum: Date, loon: Loongegevens): number {
+  const tabel = LOONTABEL_2026[loon.schaal];
+  const leeftijd = leeftijdOp(datum, loon.geboortedatum);
+
+  if (leeftijd >= 21) {
+    const fj = Math.max(0, Math.min(Math.floor(loon.functiejaren), tabel.vanaf21.length - 1));
+    return tabel.vanaf21[fj];
+  }
+
+  if (tabel.jeugd[leeftijd] != null) return tabel.jeugd[leeftijd];
+  // Onbekende (te jonge) leeftijd voor deze schaal: pak het dichtstbijzijnde tarief.
+  const leeftijden = Object.keys(tabel.jeugd).map(Number).sort((a, b) => a - b);
+  const lager = leeftijden.filter((l) => l <= leeftijd);
+  if (lager.length) return tabel.jeugd[lager[lager.length - 1]];
+  return tabel.jeugd[leeftijden[0]];
 }
 
 export interface BrutoComponenten {
@@ -138,9 +151,9 @@ export interface DienstBuckets extends BrutoInvoer {
 }
 
 /** Bepaal de toeslag-bakjes (zondag/feestdag/avond) voor één dienst. */
-export function bucketsVoorDienst(dienst: Dienst): DienstBuckets {
+export function bucketsVoorDienst(dienst: Dienst, loon: Loongegevens): DienstBuckets {
   const datum = dienst.start;
-  const uurloon = uurloonVoorDatum(datum);
+  const uurloon = uurloonVoorDatum(datum, loon);
   const gewerkteUren = gewerkteUrenVan(dienst);
   const fdNaam = feestdagNaam(datum);
   const isFeestdag = fdNaam !== undefined;
@@ -157,12 +170,12 @@ export function bucketsVoorDienst(dienst: Dienst): DienstBuckets {
   return { gewerkteUren, uurloon, zondagUren, feestdagUren, avondUren, isZondag, isFeestdag, feestdagNaam: fdNaam };
 }
 
-export function componentenVoorDienst(dienst: Dienst): BrutoComponenten {
-  return componenten(bucketsVoorDienst(dienst));
+export function componentenVoorDienst(dienst: Dienst, loon: Loongegevens): BrutoComponenten {
+  return componenten(bucketsVoorDienst(dienst, loon));
 }
 
-export function loonVoorDienst(dienst: Dienst): DienstLoon {
-  const b = bucketsVoorDienst(dienst);
+export function loonVoorDienst(dienst: Dienst, loon: Loongegevens): DienstLoon {
+  const b = bucketsVoorDienst(dienst, loon);
   const c = componenten(b);
   const maaltijd = dienst.pauzeUur >= OVERIG.maaltijdMinPauzeUur ? OVERIG.maaltijdvergoeding : 0;
   return {

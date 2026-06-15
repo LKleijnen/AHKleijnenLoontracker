@@ -1,3 +1,24 @@
+import type { Schaal } from "./config";
+
+/** Geboortedatum als losse velden (lokale datum, geen tijdzone-gedoe). */
+export interface Geboortedatum {
+  jaar: number;
+  maand: number; // 1-12
+  dag: number;
+}
+
+/** Loon-bepalende gegevens van één gebruiker (bepalen het uurloon). */
+export interface Loongegevens {
+  geboortedatum: Geboortedatum;
+  schaal: Schaal;
+  functiejaren: number; // 0 = startjaar (21+); telt niet mee onder 21
+}
+
+/** Alles wat een gebruiker invult en in localStorage bewaart. */
+export interface Instellingen extends Loongegevens {
+  icalUrl: string;
+}
+
 /** Eén dienst zoals uit de rooster-iCal geparsed. Tijden zijn lokale wandkloktijd. */
 export interface Dienst {
   uid: string;

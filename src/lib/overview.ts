@@ -8,7 +8,7 @@ import {
 } from "./pay";
 import { TOESLAGEN } from "./config";
 import { periode, periodeIndexVoor, huidigePeriode } from "./periods";
-import type { Dienst } from "./types";
+import type { Dienst, Loongegevens } from "./types";
 
 export interface RegelUit { label: string; bedrag: number; toelichting?: string; }
 export interface DienstUit {
@@ -83,8 +83,8 @@ function isoWeek(date: Date): { week: number; jaar: number } {
   return { week, jaar };
 }
 
-function dienstUit(dienst: Dienst, nu: Date): DienstUit {
-  const l = loonVoorDienst(dienst);
+function dienstUit(dienst: Dienst, nu: Date, loon: Loongegevens): DienstUit {
+  const l = loonVoorDienst(dienst, loon);
   let badge: string | undefined;
   if (l.isFeestdag) badge = l.feestdagNaam;
   else if (l.isZondag) badge = "Zondag";
@@ -103,8 +103,8 @@ function dienstUit(dienst: Dienst, nu: Date): DienstUit {
   };
 }
 
-function berekenTarieven(nu: Date): Tarieven {
-  const uurloon = uurloonVoorDatum(nu);
+function berekenTarieven(nu: Date, loon: Loongegevens): Tarieven {
+  const uurloon = uurloonVoorDatum(nu, loon);
   const euroR = (x: number) => Math.round(x * 100 + 1e-6) / 100; // centen-veilig
   // All-in per uur = alle bruto-componenten samen voor één gewerkt uur.
   const allInVoor = (zondagUren: number, feestdagUren: number) => {
@@ -122,7 +122,7 @@ function berekenTarieven(nu: Date): Tarieven {
   };
 }
 
-export function bouwOverzicht(diensten: Dienst[], nu: Date = new Date()): Overzicht {
+export function bouwOverzicht(diensten: Dienst[], loon: Loongegevens, nu: Date = new Date()): Overzicht {
   const huidig = huidigePeriode(nu);
 
   // Groepeer diensten per periode-index.
@@ -138,12 +138,12 @@ export function bouwOverzicht(diensten: Dienst[], nu: Date = new Date()): Overzi
   for (const [idx, lijst] of perIndex) {
     const p = periode(idx);
     lijst.sort((a, b) => a.start.getTime() - b.start.getTime());
-    const dUit = lijst.map((d) => dienstUit(d, nu));
+    const dUit = lijst.map((d) => dienstUit(d, nu, loon));
     const dUitByUid = new Map(dUit.map((d) => [d.uid, d]));
 
-    const bruto = brutoAfgerond(somComponenten(lijst.map(componentenVoorDienst)));
+    const bruto = brutoAfgerond(somComponenten(lijst.map((d) => componentenVoorDienst(d, loon))));
     const gewerkt = lijst.filter((d) => d.eind.getTime() <= nu.getTime());
-    const opgebouwd = brutoAfgerond(somComponenten(gewerkt.map(componentenVoorDienst)));
+    const opgebouwd = brutoAfgerond(somComponenten(gewerkt.map((d) => componentenVoorDienst(d, loon))));
     const maaltijd = round2(dUit.reduce((s, d) => s + d.maaltijd, 0));
     const uren = round2(dUit.reduce((s, d) => s + d.gewerkteUren, 0));
 
@@ -160,7 +160,7 @@ export function bouwOverzicht(diensten: Dienst[], nu: Date = new Date()): Overzi
       return {
         weeknummer: w.week,
         jaar: w.jaar,
-        bruto: brutoAfgerond(somComponenten(w.diensten.map(componentenVoorDienst))),
+        bruto: brutoAfgerond(somComponenten(w.diensten.map((d) => componentenVoorDienst(d, loon)))),
         uren: round2(wd.reduce((s, x) => s + x.gewerkteUren, 0)),
         aantalDiensten: w.diensten.length,
         diensten: wd,
@@ -191,7 +191,7 @@ export function bouwOverzicht(diensten: Dienst[], nu: Date = new Date()): Overzi
   return {
     gegenereerdLabel: new Intl.DateTimeFormat("nl-NL", { dateStyle: "full", timeStyle: "short" }).format(nu),
     huidigeIndex: huidig.index,
-    tarieven: berekenTarieven(nu),
+    tarieven: berekenTarieven(nu, loon),
     periodes,
   };
 }
