@@ -8,6 +8,7 @@ import { naarDienst } from "@/lib/diensten";
 import { SCHAAL_INFO, type Schaal } from "@/lib/config";
 import { useFirebaseAuth, type FirebaseAuth } from "@/lib/auth";
 import { syncHistorie, voegSamen, laadLokaal } from "@/lib/historie";
+import { laadInstellingenCloud, bewaarInstellingenCloud } from "@/lib/profiel";
 
 const OPSLAG_KEY = "loon_instellingen";
 
@@ -99,6 +100,35 @@ export default function Page() {
     return () => { actief = false; };
   }, [ruwLive, auth.gebruiker?.uid, auth.laden]);
 
+  // Bij inloggen: haal je opgeslagen instellingen uit de cloud zodat je de
+  // onboarding kunt overslaan. Andersom: heb je lokaal wél instellingen maar de
+  // cloud nog niet, bewaar ze dan voor je andere apparaten.
+  useEffect(() => {
+    const uid = auth.gebruiker?.uid;
+    if (auth.laden || !uid) return;
+    let actief = true;
+    (async () => {
+      try {
+        const cloudInst = await laadInstellingenCloud(uid);
+        if (!actief) return;
+        if (cloudInst && !instellingen) {
+          localStorage.setItem(OPSLAG_KEY, JSON.stringify(cloudInst));
+          setInstellingen(cloudInst);
+          setStatus("klaar");
+          haalRooster(cloudInst);
+        } else if (!cloudInst && instellingen) {
+          await bewaarInstellingenCloud(uid, instellingen);
+        }
+      } catch {
+        /* best-effort — onboarding blijft gewoon werken */
+      }
+    })();
+    return () => { actief = false; };
+    // instellingen bewust niet in deps: we reageren op in-/uitloggen, niet op
+    // elke instellingen-wijziging (die schrijft `bewaar` al naar de cloud).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth.gebruiker?.uid, auth.laden]);
+
   // Loon wordt client-side berekend over live + opgeslagen diensten samen.
   // Zo beweegt ook de historie mee als je later je schaal/geboortedatum wijzigt.
   const overzicht = useMemo(() => {
@@ -112,6 +142,8 @@ export default function Page() {
     setInstellingen(inst);
     setBewerken(false);
     haalRooster(inst);
+    const uid = auth.gebruiker?.uid;
+    if (uid) bewaarInstellingenCloud(uid, inst).catch(() => { /* best-effort */ });
   }
 
   if (status === "init") return <Centraal>Laden…</Centraal>;
@@ -196,13 +228,15 @@ function Onboarding({ onKlaar, auth }: { onKlaar: (i: Instellingen) => void; aut
   const [functiejaren, setFunctiejaren] = useState(0);
   const [icalUrl, setIcalUrl] = useState("");
   const [fout, setFout] = useState("");
+  const [toonLogin, setToonLogin] = useState(false);
 
   const geb = gebISO ? naarGeboortedatum(gebISO) : null;
   const leeftijd = geb ? leeftijdNu(geb) : null;
   const toonFunctiejaren = leeftijd != null && leeftijd >= 21;
 
-  // De account-stap verschijnt alleen als de cloud-functie beschikbaar is.
-  const heeftAccountStap = auth.beschikbaar;
+  // De account-stap is alleen zinvol als de cloud beschikbaar is én je nog niet
+  // ingelogd bent (anders is inloggen al gebeurd via de knop bovenaan).
+  const heeftAccountStap = auth.beschikbaar && !auth.gebruiker;
   const totaalStappen = heeftAccountStap ? 4 : 3;
 
   function volgende() {
@@ -239,6 +273,36 @@ function Onboarding({ onKlaar, auth }: { onKlaar: (i: Instellingen) => void; aut
         </div>
 
         <StapBalk huidig={stap} totaal={totaalStappen} />
+
+        {stap === 1 && auth.beschikbaar && (
+          auth.gebruiker ? (
+            <div className="rounded-lg bg-green-50 px-3 py-2 text-xs leading-relaxed text-green-700">
+              Ingelogd als <strong className="break-all">{auth.gebruiker.email ?? "je account"}</strong>.
+              We vonden nog geen opgeslagen gegevens — vul ze hieronder in, dan bewaren we ze in je account.
+            </div>
+          ) : !toonLogin ? (
+            <button
+              onClick={() => setToonLogin(true)}
+              className="w-full rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100"
+            >
+              Heb je al een account? <span className="font-semibold text-ah-blue">Inloggen</span>
+            </button>
+          ) : (
+            <div className="space-y-2 rounded-lg bg-slate-50 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-slate-700">Inloggen</span>
+                <button onClick={() => setToonLogin(false)} className="text-xs text-slate-400 hover:text-slate-600">
+                  sluiten
+                </button>
+              </div>
+              <p className="text-xs leading-relaxed text-slate-500">
+                Log in om je opgeslagen gegevens en geschiedenis op te halen — dan hoef je niets
+                opnieuw in te vullen.
+              </p>
+              <AccountFormulier auth={auth} />
+            </div>
+          )
+        )}
 
         {stap === 1 && (
           <div className="space-y-3">

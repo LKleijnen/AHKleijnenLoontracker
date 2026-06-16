@@ -116,6 +116,12 @@ lokale geschiedenis mee omhoog gemigreerd. Het loon wordt **client-side** bereke
 (`bouwOverzicht`) over de live iCal + de opgeslagen diensten samen, zodat de
 historie automatisch meebeweegt als je later je schaal of geboortedatum corrigeert.
 
+Ook je **instellingen** (geboortedatum, schaal, functiejaren, iCal-link) worden
+ingelogd bewaard op `gebruikers/{uid}` (`profiel.ts`). Daardoor kun je in de
+onboarding op **"Heb je al een account? Inloggen"** klikken: log je in en zijn er
+opgeslagen gegevens, dan slaat de app de invulstappen over en laadt je dashboard
+direct. Op een nieuw apparaat waar je nog ingelogd bent gebeurt dat automatisch.
+
 > Let op: een dienst wordt bewaard zodra je de app opent terwijl die dienst nog
 > in het ~4-weken-iCal-venster zit. Open je de app maandenlang niet, dan kan een
 > dienst tussendoor uit de bron vallen voordat hij is opgeslagen.
