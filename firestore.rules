@@ -1,0 +1,12 @@
+rules_version = '2';
+
+// Beveiliging voor de "bewaar je geschiedenis"-functie.
+// Elke gebruiker mag uitsluitend bij zijn eigen diensten onder zijn eigen uid.
+// Plak deze regels in Firebase Console → Firestore Database → Rules → Publiceren.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /gebruikers/{uid}/diensten/{dienst} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}

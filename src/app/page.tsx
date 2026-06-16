@@ -1,9 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { Overzicht, PeriodeUit, DienstUit, Tarieven } from "@/lib/overview";
-import type { Instellingen, Geboortedatum } from "@/lib/types";
+import { useEffect, useMemo, useState } from "react";
+import type { PeriodeUit, DienstUit, Tarieven } from "@/lib/overview";
+import { bouwOverzicht } from "@/lib/overview";
+import type { Instellingen, Geboortedatum, RuweDienst } from "@/lib/types";
+import { naarDienst } from "@/lib/diensten";
 import { SCHAAL_INFO, type Schaal } from "@/lib/config";
+import { useFirebaseAuth, type FirebaseAuth } from "@/lib/auth";
+import { syncHistorie, voegSamen, laadLokaal } from "@/lib/historie";
 
 const OPSLAG_KEY = "loon_instellingen";
 
@@ -34,23 +38,26 @@ function geldigeIcalUrl(url: string): boolean {
 
 export default function Page() {
   const [instellingen, setInstellingen] = useState<Instellingen | null>(null);
-  const [overzicht, setOverzicht] = useState<Overzicht | null>(null);
+  const [ruwLive, setRuwLive] = useState<RuweDienst[] | null>(null);
+  const [historieRuw, setHistorieRuw] = useState<RuweDienst[]>([]);
+  const [historieFout, setHistorieFout] = useState("");
   const [status, setStatus] = useState<"init" | "onboarding" | "laden" | "klaar">("init");
   const [fout, setFout] = useState("");
   const [bewerken, setBewerken] = useState(false);
+  const auth = useFirebaseAuth();
 
-  async function haalOverzicht(inst: Instellingen) {
+  async function haalRooster(inst: Instellingen) {
     setStatus("laden");
     setFout("");
     try {
       const res = await fetch("/api/rooster", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(inst),
+        body: JSON.stringify({ icalUrl: inst.icalUrl }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.fout || "Er ging iets mis");
-      setOverzicht(data);
+      setRuwLive(data.diensten as RuweDienst[]);
       setStatus("klaar");
     } catch (e: any) {
       setFout(e.message || "Er ging iets mis");
@@ -59,13 +66,14 @@ export default function Page() {
   }
 
   useEffect(() => {
+    setHistorieRuw(laadLokaal()); // toon bewaarde historie meteen
     const raw = localStorage.getItem(OPSLAG_KEY);
     if (raw) {
       try {
         const inst = JSON.parse(raw) as Instellingen;
         if (inst?.icalUrl && inst?.geboortedatum && inst?.schaal) {
           setInstellingen(inst);
-          haalOverzicht(inst);
+          haalRooster(inst);
           return;
         }
       } catch {
@@ -75,21 +83,47 @@ export default function Page() {
     setStatus("onboarding");
   }, []);
 
+  // Snapshot elke voorbije dienst en laad de volledige geschiedenis (lokaal of,
+  // als je ingelogd bent, uit de cloud). Draait zodra het live rooster binnen is
+  // en telkens als je in-/uitlogt. Wacht tot de auth-status bekend is.
+  useEffect(() => {
+    if (!ruwLive || auth.laden) return;
+    let actief = true;
+    syncHistorie(ruwLive, auth.gebruiker?.uid ?? null)
+      .then((res) => {
+        if (!actief) return;
+        setHistorieRuw(res.diensten);
+        setHistorieFout(res.cloudFout ?? "");
+      })
+      .catch(() => { /* historie is bijzaak — negeer */ });
+    return () => { actief = false; };
+  }, [ruwLive, auth.gebruiker?.uid, auth.laden]);
+
+  // Loon wordt client-side berekend over live + opgeslagen diensten samen.
+  // Zo beweegt ook de historie mee als je later je schaal/geboortedatum wijzigt.
+  const overzicht = useMemo(() => {
+    if (!ruwLive || !instellingen) return null;
+    const alle = voegSamen(historieRuw, ruwLive).map(naarDienst); // live wint
+    return bouwOverzicht(alle, instellingen);
+  }, [ruwLive, historieRuw, instellingen]);
+
   function bewaar(inst: Instellingen) {
     localStorage.setItem(OPSLAG_KEY, JSON.stringify(inst));
     setInstellingen(inst);
     setBewerken(false);
-    haalOverzicht(inst);
+    haalRooster(inst);
   }
 
   if (status === "init") return <Centraal>Laden…</Centraal>;
 
   if (status === "onboarding" || !instellingen) {
-    return <Onboarding onKlaar={bewaar} />;
+    return <Onboarding onKlaar={bewaar} auth={auth} />;
   }
 
   const huidige = overzicht?.periodes.find((p) => p.isHuidig);
   const toekomst = overzicht?.periodes.filter((p) => p.isToekomst) ?? [];
+  // Voorbije periodes komen uit de samengevoegde diensten (live + opgeslagen),
+  // dus ze blijven zichtbaar ook nadat ze uit de ~4-weken-iCal zijn gevallen.
   const verleden = overzicht?.periodes.filter((p) => !p.isHuidig && !p.isToekomst) ?? [];
 
   return (
@@ -145,6 +179,8 @@ export default function Page() {
           huidig={instellingen}
           onOpslaan={bewaar}
           onSluit={() => setBewerken(false)}
+          auth={auth}
+          historieFout={historieFout}
         />
       )}
     </div>
@@ -153,7 +189,7 @@ export default function Page() {
 
 /* ---------- Onboarding (stapsgewijze wizard) ---------- */
 
-function Onboarding({ onKlaar }: { onKlaar: (i: Instellingen) => void }) {
+function Onboarding({ onKlaar, auth }: { onKlaar: (i: Instellingen) => void; auth: FirebaseAuth }) {
   const [stap, setStap] = useState(1);
   const [gebISO, setGebISO] = useState("");
   const [schaal, setSchaal] = useState<Schaal | "">("");
@@ -165,6 +201,10 @@ function Onboarding({ onKlaar }: { onKlaar: (i: Instellingen) => void }) {
   const leeftijd = geb ? leeftijdNu(geb) : null;
   const toonFunctiejaren = leeftijd != null && leeftijd >= 21;
 
+  // De account-stap verschijnt alleen als de cloud-functie beschikbaar is.
+  const heeftAccountStap = auth.beschikbaar;
+  const totaalStappen = heeftAccountStap ? 4 : 3;
+
   function volgende() {
     setFout("");
     if (stap === 1) {
@@ -172,6 +212,10 @@ function Onboarding({ onKlaar }: { onKlaar: (i: Instellingen) => void }) {
       if (leeftijd! < 13 || leeftijd! > 80) return setFout("Controleer je geboortedatum.");
     }
     if (stap === 2 && !schaal) return setFout("Kies je loonschaal.");
+    if (stap === 3) {
+      if (!geldigeIcalUrl(icalUrl)) return setFout("Plak de https-link van personeelstool.nl.");
+      if (!heeftAccountStap) return afronden();
+    }
     setStap(stap + 1);
   }
 
@@ -194,7 +238,7 @@ function Onboarding({ onKlaar }: { onKlaar: (i: Instellingen) => void }) {
           <div className="text-sm text-slate-500">Even instellen — dit hoeft maar één keer.</div>
         </div>
 
-        <StapBalk huidig={stap} totaal={3} />
+        <StapBalk huidig={stap} totaal={totaalStappen} />
 
         {stap === 1 && (
           <div className="space-y-3">
@@ -250,6 +294,20 @@ function Onboarding({ onKlaar }: { onKlaar: (i: Instellingen) => void }) {
           </div>
         )}
 
+        {stap === 4 && (
+          <div className="space-y-3">
+            <label className="block text-sm font-semibold text-slate-700">
+              Bewaar je geschiedenis <span className="font-normal text-slate-400">(optioneel)</span>
+            </label>
+            <p className="text-xs leading-relaxed text-slate-500">
+              Maak een account om je afgelopen periodes te bewaren en op al je apparaten terug te
+              zien. Zonder account blijft je geschiedenis alleen op dit apparaat staan. Je kunt dit
+              ook later via Instellingen doen.
+            </p>
+            <AccountFormulier auth={auth} onKlaar={afronden} />
+          </div>
+        )}
+
         {fout && <div className="text-sm text-red-600">{fout}</div>}
 
         <div className="flex items-center justify-between gap-3 pt-1">
@@ -263,7 +321,7 @@ function Onboarding({ onKlaar }: { onKlaar: (i: Instellingen) => void }) {
           ) : (
             <span />
           )}
-          {stap < 3 ? (
+          {stap < totaalStappen ? (
             <button
               onClick={volgende}
               className="rounded-lg bg-ah-blue px-5 py-2 font-semibold text-white hover:bg-ah-dark"
@@ -273,9 +331,13 @@ function Onboarding({ onKlaar }: { onKlaar: (i: Instellingen) => void }) {
           ) : (
             <button
               onClick={afronden}
-              className="rounded-lg bg-ah-blue px-5 py-2 font-semibold text-white hover:bg-ah-dark"
+              className={
+                heeftAccountStap
+                  ? "rounded-lg px-5 py-2 font-medium text-slate-500 hover:bg-slate-100"
+                  : "rounded-lg bg-ah-blue px-5 py-2 font-semibold text-white hover:bg-ah-dark"
+              }
             >
-              Klaar
+              {heeftAccountStap ? "Overslaan" : "Klaar"}
             </button>
           )}
         </div>
@@ -416,10 +478,14 @@ function InstellingenModal({
   huidig,
   onOpslaan,
   onSluit,
+  auth,
+  historieFout,
 }: {
   huidig: Instellingen;
   onOpslaan: (i: Instellingen) => void;
   onSluit: () => void;
+  auth: FirebaseAuth;
+  historieFout?: string;
 }) {
   const [gebISO, setGebISO] = useState(naarISO(huidig.geboortedatum));
   const [schaal, setSchaal] = useState<Schaal>(huidig.schaal);
@@ -491,6 +557,47 @@ function InstellingenModal({
           </details>
         </div>
 
+        {auth.beschikbaar && (
+          <div className="space-y-2 border-t border-slate-100 pt-3">
+            <label className="block text-sm font-semibold text-slate-700">Account &amp; geschiedenis</label>
+            {auth.gebruiker ? (
+              <>
+                <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                  <span className="min-w-0 text-sm text-slate-600">
+                    Ingelogd als{" "}
+                    <strong className="break-all">{auth.gebruiker.email ?? "je account"}</strong>
+                  </span>
+                  <button
+                    onClick={() => auth.uitloggen()}
+                    className="shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-500 hover:bg-slate-200"
+                  >
+                    Uitloggen
+                  </button>
+                </div>
+                {historieFout ? (
+                  <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-700">
+                    Cloud-opslag mislukt: {historieFout}. Je geschiedenis staat nog wel op dit
+                    apparaat. Check of de Firestore-database bestaat en de regels uit{" "}
+                    <code>firestore.rules</code> gepubliceerd zijn.
+                  </p>
+                ) : (
+                  <p className="text-xs leading-relaxed text-slate-500">
+                    Je gewerkte diensten worden bewaard in je account en gesynct over je apparaten.
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="text-xs leading-relaxed text-slate-500">
+                  Log in om je afgelopen periodes te bewaren en op al je apparaten terug te zien.
+                  Zonder account blijft je geschiedenis alleen op dit apparaat.
+                </p>
+                <AccountFormulier auth={auth} />
+              </>
+            )}
+          </div>
+        )}
+
         {fout && <div className="text-sm text-red-600">{fout}</div>}
 
         <div className="flex justify-end gap-2 pt-1">
@@ -502,6 +609,93 @@ function InstellingenModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ---------- Account (inloggen / registreren) ---------- */
+
+function AccountFormulier({ auth, onKlaar }: { auth: FirebaseAuth; onKlaar?: () => void }) {
+  const [modus, setModus] = useState<"login" | "registreren">("login");
+  const [email, setEmail] = useState("");
+  const [wachtwoord, setWachtwoord] = useState("");
+  const [fout, setFout] = useState("");
+  const [bezig, setBezig] = useState(false);
+
+  async function probeer(actie: () => Promise<void>) {
+    setFout("");
+    setBezig(true);
+    try {
+      await actie();
+      onKlaar?.();
+    } catch (e: any) {
+      setFout(e?.message || "Er ging iets mis.");
+    } finally {
+      setBezig(false);
+    }
+  }
+
+  const veld =
+    "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-ah-blue";
+
+  return (
+    <div className="space-y-3">
+      <button
+        type="button"
+        disabled={bezig}
+        onClick={() => probeer(() => auth.inloggenGoogle())}
+        className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+      >
+        <GoogleIcoon />
+        Doorgaan met Google
+      </button>
+
+      <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-slate-400">
+        <span className="h-px flex-1 bg-slate-200" /> of e-mail <span className="h-px flex-1 bg-slate-200" />
+      </div>
+
+      <input
+        type="email"
+        inputMode="email"
+        autoComplete="email"
+        placeholder="E-mailadres"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        className={veld}
+      />
+      <input
+        type="password"
+        autoComplete={modus === "login" ? "current-password" : "new-password"}
+        placeholder="Wachtwoord"
+        value={wachtwoord}
+        onChange={(e) => setWachtwoord(e.target.value)}
+        className={veld}
+      />
+
+      {fout && <div className="text-sm text-red-600">{fout}</div>}
+
+      <button
+        type="button"
+        disabled={bezig}
+        onClick={() =>
+          probeer(() =>
+            modus === "login"
+              ? auth.inloggenEmail(email, wachtwoord)
+              : auth.registrerenEmail(email, wachtwoord),
+          )
+        }
+        className="w-full rounded-lg bg-ah-blue px-4 py-2 text-sm font-semibold text-white hover:bg-ah-dark disabled:opacity-50"
+      >
+        {modus === "login" ? "Inloggen" : "Account aanmaken"}
+      </button>
+
+      <button
+        type="button"
+        onClick={() => { setFout(""); setModus(modus === "login" ? "registreren" : "login"); }}
+        className="w-full text-center text-xs text-ah-blue hover:underline"
+      >
+        {modus === "login" ? "Nog geen account? Maak er een aan" : "Heb je al een account? Inloggen"}
+      </button>
     </div>
   );
 }
@@ -710,6 +904,17 @@ function Centraal({ children }: { children: React.ReactNode }) {
 
 function Skeleton() {
   return <div className="h-40 animate-pulse rounded-2xl bg-slate-200" />;
+}
+
+function GoogleIcoon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z" />
+      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z" />
+      <path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z" />
+      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84C6.71 7.3 9.14 5.38 12 5.38z" />
+    </svg>
+  );
 }
 
 function TandwielIcoon() {

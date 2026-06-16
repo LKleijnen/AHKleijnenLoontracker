@@ -28,6 +28,20 @@ export interface Dienst {
   afdeling: string; // SUMMARY, bijv. "Operatie"
 }
 
+/**
+ * Eén dienst als ruwe, opslagbare gegevens — géén loon, géén tijdzone.
+ * Tijden zijn naïeve wandkloktijd "YYYY-MM-DDTHH:mm" (precies wat de iCal
+ * aangeeft), zodat herberekenen in elke tijdzone hetzelfde uur teruggeeft.
+ * Dit is wat we per gewerkte dienst bewaren (lokaal of in de cloud).
+ */
+export interface RuweDienst {
+  uid: string;
+  start: string;
+  eind: string;
+  pauzeUur: number;
+  afdeling: string;
+}
+
 /** Eén regel in de uitklapbare opbouw van een dienst/periode. */
 export interface LoonRegel {
   key: string;
