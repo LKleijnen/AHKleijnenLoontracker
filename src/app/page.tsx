@@ -1,14 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { PeriodeUit, DienstUit, Tarieven } from "@/lib/overview";
 import { bouwOverzicht } from "@/lib/overview";
 import type { Instellingen, Geboortedatum, RuweDienst } from "@/lib/types";
-import { naarDienst } from "@/lib/diensten";
+import { naarDienst, overlapt } from "@/lib/diensten";
 import { SCHAAL_INFO, type Schaal } from "@/lib/config";
 import { useFirebaseAuth, type FirebaseAuth } from "@/lib/auth";
-import { syncHistorie, voegSamen, laadLokaal } from "@/lib/historie";
+import { syncHistorie, voegSamen, laadLokaal, bewaarLokaal, bewaarCloud, verwijderCloud } from "@/lib/historie";
 import { laadInstellingenCloud, bewaarInstellingenCloud } from "@/lib/profiel";
+
+const AFDELINGEN = ["Operatie", "Vers", "Kassa"];
+
+/** Verwijder-handler voor handmatige diensten, via context i.p.v. prop-drilling. */
+const VerwijderDienstContext = createContext<((uid: string) => void) | null>(null);
+
+function nieuweUid(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return `handmatig-${crypto.randomUUID()}`;
+  return `handmatig-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 const OPSLAG_KEY = "loon_instellingen";
 
@@ -45,6 +55,7 @@ export default function Page() {
   const [status, setStatus] = useState<"init" | "onboarding" | "laden" | "klaar">("init");
   const [fout, setFout] = useState("");
   const [bewerken, setBewerken] = useState(false);
+  const [toevoegen, setToevoegen] = useState(false);
   const auth = useFirebaseAuth();
 
   async function haalRooster(inst: Instellingen) {
@@ -146,6 +157,28 @@ export default function Page() {
     if (uid) bewaarInstellingenCloud(uid, inst).catch(() => { /* best-effort */ });
   }
 
+  // Voegt een handmatige dienst toe. Geeft een foutmelding terug, of null bij succes.
+  function voegDienstToe(nieuw: RuweDienst): string | null {
+    const bestaande = voegSamen(historieRuw, ruwLive ?? []).map(naarDienst);
+    if (overlapt(naarDienst(nieuw), bestaande)) {
+      return "Er staat al een dienst op dat moment. Diensten mogen niet overlappen.";
+    }
+    const lijst = [...historieRuw, nieuw];
+    setHistorieRuw(lijst);
+    bewaarLokaal(lijst);
+    const uid = auth.gebruiker?.uid;
+    if (uid) bewaarCloud(uid, [nieuw]).catch(() => { /* best-effort */ });
+    return null;
+  }
+
+  function verwijderDienst(dienstUid: string) {
+    const lijst = historieRuw.filter((d) => d.uid !== dienstUid);
+    setHistorieRuw(lijst);
+    bewaarLokaal(lijst);
+    const uid = auth.gebruiker?.uid;
+    if (uid) verwijderCloud(uid, dienstUid).catch(() => { /* best-effort */ });
+  }
+
   if (status === "init") return <Centraal>Laden…</Centraal>;
 
   if (status === "onboarding" || !instellingen) {
@@ -159,19 +192,29 @@ export default function Page() {
   const verleden = overzicht?.periodes.filter((p) => !p.isHuidig && !p.isToekomst) ?? [];
 
   return (
+   <VerwijderDienstContext.Provider value={verwijderDienst}>
     <div className="mx-auto max-w-2xl px-4 pb-16">
       <header className="flex items-center justify-between py-5">
         <div>
           <h1 className="text-xl font-bold text-ah-blue">Loontracker</h1>
           <p className="text-xs text-slate-500">Bruto · toeslagen over basisloon</p>
         </div>
-        <button
-          onClick={() => setBewerken(true)}
-          className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
-        >
-          <TandwielIcoon />
-          Instellingen
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setToevoegen(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
+          >
+            <PlusIcoon />
+            Dienst
+          </button>
+          <button
+            onClick={() => setBewerken(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
+          >
+            <TandwielIcoon />
+            Instellingen
+          </button>
+        </div>
       </header>
 
       {status === "laden" && <Skeleton />}
@@ -215,7 +258,15 @@ export default function Page() {
           historieFout={historieFout}
         />
       )}
+
+      {toevoegen && (
+        <DienstToevoegenModal
+          onToevoegen={voegDienstToe}
+          onSluit={() => setToevoegen(false)}
+        />
+      )}
     </div>
+   </VerwijderDienstContext.Provider>
   );
 }
 
@@ -764,6 +815,115 @@ function AccountFormulier({ auth, onKlaar }: { auth: FirebaseAuth; onKlaar?: () 
   );
 }
 
+/* ---------- Handmatige dienst toevoegen ---------- */
+
+function DienstToevoegenModal({
+  onToevoegen,
+  onSluit,
+}: {
+  onToevoegen: (d: RuweDienst) => string | null;
+  onSluit: () => void;
+}) {
+  const [datum, setDatum] = useState("");
+  const [start, setStart] = useState("");
+  const [eind, setEind] = useState("");
+  const [pauze, setPauze] = useState(""); // minuten
+  const [afdeling, setAfdeling] = useState(AFDELINGEN[0]);
+  const [fout, setFout] = useState("");
+
+  const nu = new Date();
+  const vandaagISO = `${nu.getFullYear()}-${String(nu.getMonth() + 1).padStart(2, "0")}-${String(nu.getDate()).padStart(2, "0")}`;
+
+  function opslaan() {
+    setFout("");
+    if (!datum || !start || !eind) return setFout("Vul datum, begintijd en eindtijd in.");
+    const pauzeMin = Math.max(0, parseInt(pauze, 10) || 0);
+    const nieuw: RuweDienst = {
+      uid: nieuweUid(),
+      start: `${datum}T${start}`,
+      eind: `${datum}T${eind}`,
+      pauzeUur: pauzeMin / 60,
+      afdeling,
+      bron: "handmatig",
+    };
+    const d = naarDienst(nieuw);
+    if (isNaN(d.start.getTime()) || isNaN(d.eind.getTime())) return setFout("Ongeldige tijd.");
+    if (d.eind.getTime() <= d.start.getTime()) return setFout("De eindtijd moet ná de begintijd liggen.");
+    if (d.eind.getTime() > Date.now()) return setFout("Je kunt alleen diensten in het verleden toevoegen.");
+    const duurUur = (d.eind.getTime() - d.start.getTime()) / 3600000;
+    if (nieuw.pauzeUur >= duurUur) return setFout("De pauze is langer dan de dienst.");
+    const err = onToevoegen(nieuw);
+    if (err) return setFout(err);
+    onSluit();
+  }
+
+  const veld = "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-ah-blue";
+  return (
+    <div className="fixed inset-0 z-10 flex items-start justify-center overflow-y-auto bg-black/40 p-4">
+      <div className="my-8 w-full max-w-sm space-y-4 rounded-2xl bg-white p-6 shadow-xl">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold text-ah-blue">Dienst toevoegen</h2>
+          <button onClick={onSluit} className="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+        <p className="text-xs leading-relaxed text-slate-500">
+          Voeg een dienst toe die je gewerkt hebt maar niet (meer) in je rooster staat.
+          Alleen diensten in het verleden; ze mogen niet overlappen met een bestaande dienst.
+        </p>
+
+        <div className="space-y-1">
+          <label className="block text-sm font-semibold text-slate-700">Datum</label>
+          <input type="date" max={vandaagISO} value={datum} onChange={(e) => setDatum(e.target.value)} className={veld} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <label className="block text-sm font-semibold text-slate-700">Begintijd</label>
+            <input type="time" value={start} onChange={(e) => setStart(e.target.value)} className={veld} />
+          </div>
+          <div className="space-y-1">
+            <label className="block text-sm font-semibold text-slate-700">Eindtijd</label>
+            <input type="time" value={eind} onChange={(e) => setEind(e.target.value)} className={veld} />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <label className="block text-sm font-semibold text-slate-700">Pauze (min)</label>
+            <input
+              type="number"
+              min={0}
+              inputMode="numeric"
+              placeholder="30"
+              value={pauze}
+              onChange={(e) => setPauze(e.target.value)}
+              className={veld}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="block text-sm font-semibold text-slate-700">Afdeling</label>
+            <select value={afdeling} onChange={(e) => setAfdeling(e.target.value)} className={veld}>
+              {AFDELINGEN.map((a) => (
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {fout && <div className="text-sm text-red-600">{fout}</div>}
+
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onSluit} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-500 hover:bg-slate-100">
+            Annuleren
+          </button>
+          <button onClick={opslaan} className="rounded-lg bg-ah-blue px-5 py-2 font-semibold text-white hover:bg-ah-dark">
+            Toevoegen
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Dashboard ---------- */
 
 function HuidigeKaart({ p }: { p: PeriodeUit }) {
@@ -904,23 +1064,42 @@ function PeriodeKaart({ p, voorspelling, perWeek }: { p: PeriodeUit; voorspellin
 
 function DienstRij({ d, donker }: { d: DienstUit; donker?: boolean }) {
   const [open, setOpen] = useState(false);
+  const verwijder = useContext(VerwijderDienstContext);
+  const handmatig = d.bron === "handmatig";
   const basis = donker
     ? "bg-white/10 text-white"
     : "bg-white text-slate-800 border border-slate-200";
   return (
     <div className={`rounded-lg ${basis}`}>
-      <button onClick={() => setOpen(!open)} className="flex w-full items-center justify-between px-3 py-2 text-left">
-        <div className="flex items-center gap-2">
-          <span className={`text-sm font-medium capitalize ${donker ? "" : "text-slate-700"}`}>{d.datumLabel}</span>
-          <span className={`text-xs ${donker ? "opacity-80" : "text-slate-500"}`}>{d.tijd}</span>
-          {d.badge && (
-            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${donker ? "bg-white/25" : "bg-ah-light text-ah-dark"}`}>
-              {d.badge}
-            </span>
-          )}
-        </div>
-        <span className="text-sm font-semibold">{euro(d.bruto)}</span>
-      </button>
+      <div className="flex items-center">
+        <button onClick={() => setOpen(!open)} className="flex flex-1 items-center justify-between px-3 py-2 text-left">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`text-sm font-medium capitalize ${donker ? "" : "text-slate-700"}`}>{d.datumLabel}</span>
+            <span className={`text-xs ${donker ? "opacity-80" : "text-slate-500"}`}>{d.tijd}</span>
+            {d.badge && (
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${donker ? "bg-white/25" : "bg-ah-light text-ah-dark"}`}>
+                {d.badge}
+              </span>
+            )}
+            {handmatig && (
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${donker ? "bg-white/25" : "bg-amber-100 text-amber-700"}`}>
+                handmatig
+              </span>
+            )}
+          </div>
+          <span className="text-sm font-semibold">{euro(d.bruto)}</span>
+        </button>
+        {handmatig && verwijder && (
+          <button
+            onClick={() => { if (confirm("Deze handmatige dienst verwijderen?")) verwijder(d.uid); }}
+            className={`mr-1 shrink-0 rounded-md p-2 ${donker ? "text-white/70 hover:bg-white/15" : "text-slate-400 hover:bg-slate-100 hover:text-red-600"}`}
+            title="Verwijderen"
+            aria-label="Dienst verwijderen"
+          >
+            <PrullenbakIcoon />
+          </button>
+        )}
+      </div>
       {open && (
         <div className={`px-3 pb-2 text-sm ${donker ? "" : "text-slate-600"}`}>
           <div className={`mb-1 text-xs ${donker ? "opacity-75" : "text-slate-400"}`}>
@@ -968,6 +1147,23 @@ function Centraal({ children }: { children: React.ReactNode }) {
 
 function Skeleton() {
   return <div className="h-40 animate-pulse rounded-2xl bg-slate-200" />;
+}
+
+function PlusIcoon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+function PrullenbakIcoon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      <path d="M10 11v6M14 11v6" />
+    </svg>
+  );
 }
 
 function GoogleIcoon() {

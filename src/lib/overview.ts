@@ -22,6 +22,7 @@ export interface DienstUit {
   maaltijd: number;
   badge?: string;
   isGewerkt: boolean; // ligt in het verleden
+  bron?: "ical" | "handmatig"; // afwezig = ical
   regels: RegelUit[];
 }
 export interface WeekUit {
@@ -99,6 +100,7 @@ function dienstUit(dienst: Dienst, nu: Date, loon: Loongegevens): DienstUit {
     maaltijd: l.maaltijdvergoeding,
     badge,
     isGewerkt: dienst.eind.getTime() <= nu.getTime(),
+    bron: dienst.bron,
     regels: l.regels.map((r) => ({ label: r.label, bedrag: r.bedrag, toelichting: r.toelichting })),
   };
 }

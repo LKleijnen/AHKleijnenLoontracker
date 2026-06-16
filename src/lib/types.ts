@@ -19,6 +19,9 @@ export interface Instellingen extends Loongegevens {
   icalUrl: string;
 }
 
+/** Waar een dienst vandaan komt: uit de iCal of handmatig toegevoegd. */
+export type DienstBron = "ical" | "handmatig";
+
 /** Eén dienst zoals uit de rooster-iCal geparsed. Tijden zijn lokale wandkloktijd. */
 export interface Dienst {
   uid: string;
@@ -26,6 +29,7 @@ export interface Dienst {
   eind: Date;
   pauzeUur: number;
   afdeling: string; // SUMMARY, bijv. "Operatie"
+  bron?: DienstBron; // afwezig = "ical"
 }
 
 /**
@@ -40,6 +44,7 @@ export interface RuweDienst {
   eind: string;
   pauzeUur: number;
   afdeling: string;
+  bron?: DienstBron; // afwezig = "ical"
 }
 
 /** Eén regel in de uitklapbare opbouw van een dienst/periode. */

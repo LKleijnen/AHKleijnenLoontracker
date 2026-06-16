@@ -12,7 +12,7 @@
  * (`bouwOverzicht`), zodat de historie automatisch meebeweegt als je je schaal
  * of geboortedatum corrigeert.
  */
-import { collection, doc, getDocs, writeBatch } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDocs, writeBatch } from "firebase/firestore";
 import { getFirebase } from "./firebase";
 import { isVoorbij } from "./diensten";
 import type { RuweDienst } from "./types";
@@ -94,6 +94,12 @@ export async function bewaarCloud(uid: string, diensten: RuweDienst[]): Promise<
     }
     await batch.commit();
   }
+}
+
+export async function verwijderCloud(uid: string, dienstUid: string): Promise<void> {
+  const fb = getFirebase();
+  if (!fb) return;
+  await deleteDoc(doc(fb.db, "gebruikers", uid, "diensten", veiligeDocId(dienstUid)));
 }
 
 /* ---------- Orkestratie ---------- */

@@ -26,6 +26,7 @@ export function naarRuw(d: Dienst): RuweDienst {
     eind: naarWandklok(d.eind),
     pauzeUur: d.pauzeUur,
     afdeling: d.afdeling,
+    bron: d.bron,
   };
 }
 
@@ -36,10 +37,18 @@ export function naarDienst(r: RuweDienst): Dienst {
     eind: uitWandklok(r.eind),
     pauzeUur: r.pauzeUur,
     afdeling: r.afdeling,
+    bron: r.bron,
   };
 }
 
 /** Is deze dienst al geweest (eindtijd in het verleden)? */
 export function isVoorbij(r: RuweDienst, nu: Date = new Date()): boolean {
   return uitWandklok(r.eind).getTime() <= nu.getTime();
+}
+
+/** Overlapt deze dienst qua tijd met één van de bestaande diensten? */
+export function overlapt(nieuw: Dienst, bestaande: Dienst[]): boolean {
+  const ns = nieuw.start.getTime();
+  const ne = nieuw.eind.getTime();
+  return bestaande.some((d) => d.start.getTime() < ne && ns < d.eind.getTime());
 }

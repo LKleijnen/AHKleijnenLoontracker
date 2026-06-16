@@ -25,6 +25,10 @@ Bedoeld voor iedereen die in de winkel werkt: je vult éénmalig je gegevens in
   blijft die geschiedenis op je apparaat (localStorage); met een **optioneel
   account** (Google of e-mail/wachtwoord) wordt hij in de cloud bewaard en op al
   je apparaten gesynct. In de onboarding kun je inloggen of overslaan.
+- **Handmatig diensten toevoegen** (knop in de header) voor oude diensten die
+  niet (meer) in je rooster staan: datum, begin/eind, pauze en afdeling. Alleen
+  in het verleden, geen overlap met bestaande diensten. Handmatige diensten
+  krijgen een "handmatig"-badge en zijn met de prullenbak weer te verwijderen.
 
 Het uurloon komt uit de officiële LMB-loontabel **per 1 januari 2026** (schaal
 A/B/C). Geverifieerd tegen echte loonstroken: schaal C 19 jr = €10,49, 20 jr =
