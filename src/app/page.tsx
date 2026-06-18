@@ -3,8 +3,9 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { PeriodeUit, DienstUit, Tarieven } from "@/lib/overview";
 import { bouwOverzicht } from "@/lib/overview";
-import type { Instellingen, Geboortedatum, RuweDienst } from "@/lib/types";
+import type { Instellingen, Geboortedatum, RuweDienst, Dienst, Loongegevens } from "@/lib/types";
 import { naarDienst, overlapt } from "@/lib/diensten";
+import { actieveDienst, liveLoon } from "@/lib/live";
 import { SCHAAL_INFO, type Schaal } from "@/lib/config";
 import { useFirebaseAuth, type FirebaseAuth } from "@/lib/auth";
 import { syncHistorie, voegSamen, laadLokaal, bewaarLokaal, bewaarCloud, verwijderCloud } from "@/lib/historie";
@@ -26,6 +27,34 @@ const euro = (n: number) =>
   "€ " + n.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const uren = (n: number) =>
   n.toLocaleString("nl-NL", { maximumFractionDigits: 2 }) + " u";
+
+const klok = (d: Date) =>
+  `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+
+/** "1 u 23 min", "12 min" of "<1 min" — resterende tijd van een dienst. */
+function restLabel(ms: number): string {
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return "<1 min";
+  const u = Math.floor(min / 60);
+  const m = min % 60;
+  return u > 0 ? `${u} u ${m} min` : `${m} min`;
+}
+
+/**
+ * Splitst een bedrag in de centen ("12,34") en twee extra, sneller tikkende
+ * decimalen ("56") zodat je het geld letterlijk ziet binnenstromen.
+ */
+function splitsLive(n: number): { hoofd: string; extra: string } {
+  const veilig = Math.max(0, n);
+  const heel = Math.floor(veilig);
+  const frac = veilig - heel;
+  const centen = Math.floor(frac * 100);
+  const extra = Math.floor(frac * 10000) % 100;
+  return {
+    hoofd: `${heel.toLocaleString("nl-NL")},${String(centen).padStart(2, "0")}`,
+    extra: String(extra).padStart(2, "0"),
+  };
+}
 
 const SCHALEN: Schaal[] = ["A", "B", "C"];
 
@@ -140,13 +169,18 @@ export default function Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.gebruiker?.uid, auth.laden]);
 
+  // Alle diensten (live + opgeslagen) als Dienst-objecten; live wint bij gelijke uid.
+  const alleDiensten = useMemo<Dienst[]>(
+    () => (ruwLive ? voegSamen(historieRuw, ruwLive).map(naarDienst) : []),
+    [ruwLive, historieRuw],
+  );
+
   // Loon wordt client-side berekend over live + opgeslagen diensten samen.
   // Zo beweegt ook de historie mee als je later je schaal/geboortedatum wijzigt.
   const overzicht = useMemo(() => {
     if (!ruwLive || !instellingen) return null;
-    const alle = voegSamen(historieRuw, ruwLive).map(naarDienst); // live wint
-    return bouwOverzicht(alle, instellingen);
-  }, [ruwLive, historieRuw, instellingen]);
+    return bouwOverzicht(alleDiensten, instellingen);
+  }, [ruwLive, instellingen, alleDiensten]);
 
   function bewaar(inst: Instellingen) {
     localStorage.setItem(OPSLAG_KEY, JSON.stringify(inst));
@@ -223,6 +257,7 @@ export default function Page() {
       {overzicht && (
         <div className="space-y-6">
           <TarievenKaart t={overzicht.tarieven} />
+          <LiveKaart diensten={alleDiensten} loon={instellingen} />
           {huidige && <HuidigeKaart p={huidige} />}
 
           {toekomst.length > 0 && (
@@ -925,6 +960,76 @@ function DienstToevoegenModal({
 }
 
 /* ---------- Dashboard ---------- */
+
+/**
+ * Live-teller die alleen verschijnt terwijl er een dienst loopt. Tikt een paar
+ * keer per seconde zodat je het verdiende bedrag "op de cent" ziet binnenstromen,
+ * met een voortgangsbalk + percentage van de dienst.
+ */
+function LiveKaart({ diensten, loon }: { diensten: Dienst[]; loon: Loongegevens }) {
+  const [nu, setNu] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNu(new Date()), 150);
+    return () => clearInterval(id);
+  }, []);
+
+  const dienst = actieveDienst(diensten, nu);
+  if (!dienst) return null; // niets tonen buiten een dienst
+
+  const live = liveLoon(dienst, loon, nu);
+  const bedrag = splitsLive(live.brutoNu);
+  const pct = Math.round(live.pct);
+
+  return (
+    <section className="rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 p-5 text-white shadow-lg">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-sm font-semibold">
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-white" />
+          </span>
+          Nu aan het werk
+        </span>
+        <span className="flex items-center gap-2 text-xs opacity-90">
+          {live.badge && (
+            <span className="rounded-full bg-white/25 px-2 py-0.5 text-[10px] font-semibold">
+              {live.badge}
+            </span>
+          )}
+          {klok(live.start)}–{klok(live.eind)} · {live.afdeling}
+        </span>
+      </div>
+
+      <div className="mt-3 text-xs uppercase tracking-wide opacity-80">Tot nu verdiend (bruto)</div>
+      <div className="flex items-baseline font-bold tabular-nums">
+        <span className="text-5xl">€ {bedrag.hoofd}</span>
+        <span className="ml-0.5 text-2xl opacity-60">{bedrag.extra}</span>
+      </div>
+
+      <div className="mt-4 h-2.5 w-full overflow-hidden rounded-full bg-white/25">
+        <div
+          className="h-full rounded-full bg-white transition-[width] duration-150 ease-linear"
+          style={{ width: `${live.pct}%` }}
+        />
+      </div>
+      <div className="mt-1 flex justify-between text-xs opacity-90">
+        <span className="font-semibold">{pct}% verdiend</span>
+        <span>nog {restLabel(live.resterendMs)}</span>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-2 text-center">
+        <Stat label="Verwacht deze dienst" waarde={euro(live.brutoTotaal)} />
+        <Stat label="Gemiddeld per uur" waarde={euro(live.perUur)} />
+      </div>
+
+      {live.maaltijd > 0 && (
+        <div className="mt-3 rounded-lg bg-white/15 px-3 py-2 text-center text-xs">
+          + {euro(live.maaltijd)} maaltijdvergoeding (netto) aan het eind van je dienst
+        </div>
+      )}
+    </section>
+  );
+}
 
 function HuidigeKaart({ p }: { p: PeriodeUit }) {
   const pct = p.bruto > 0 ? Math.min(100, Math.round((p.opgebouwd / p.bruto) * 100)) : 0;

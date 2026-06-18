@@ -16,6 +16,9 @@ Bedoeld voor iedereen die in de winkel werkt: je vult éénmalig je gegevens in
 - Rekent per dienst het bruto loon uit met volledige, **uitklapbare opbouw**:
   basisloon, personeelstoeslag, zondag-/feestdag-/avondtoeslag, vakantietoeslag,
   vakantiedagen en ATV.
+- **Live tijdens je dienst**: zodra er een dienst loopt verschijnt bovenaan een
+  teller die het verdiende bruto continu "op de cent" laat oplopen, met een
+  voortgangsbalk en percentage van de dienst. Buiten een dienst is hij verborgen.
 - Toont per **4-weken-periode**: opgebouwd tot nu, verwacht eindtotaal en de
   datum waarop het op je rekening komt (loon volgt ~1 periode later).
 - Voorspelt komende periodes uit je ingeplande diensten.
@@ -70,6 +73,7 @@ Toeslag-percentages staan in `TOESLAGEN`.
 |---|---|
 | `src/lib/config.ts` | CAO-loontabel (A/B/C) + toeslagen |
 | `src/lib/pay.ts` | Reken-engine (uren + loongegevens → bruto met opbouw) |
+| `src/lib/live.ts` | Live-loon: opgebouwd bruto + % tijdens een lopende dienst |
 | `src/lib/periods.ts` | 4-weken periodekalender + uitbetaaldatum |
 | `src/lib/holidays.ts` | Nederlandse feestdagen (+100%) |
 | `src/lib/ical.ts` | Rooster-iCal parser |

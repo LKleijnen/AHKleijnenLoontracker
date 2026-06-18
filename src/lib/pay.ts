@@ -114,6 +114,18 @@ export function brutoAfgerond(c: BrutoComponenten): number {
   );
 }
 
+/**
+ * Onafgeronde som van alle bruto-componenten. Voor de live-weergave tijdens een
+ * dienst: een vloeiend, continu oplopend bedrag (i.t.t. `brutoAfgerond`, dat per
+ * component op centen afrondt en daardoor in sprongetjes loopt).
+ */
+export function brutoRuw(c: BrutoComponenten): number {
+  return (
+    c.basisloon + c.personeelstoeslag + c.zondagtoeslag + c.feestdagtoeslag +
+    c.avondtoeslag + c.vakantietoeslag + c.vakantiedagen + c.atv
+  );
+}
+
 /** Uitklapbare opbouw-regels voor weergave (zondag/feestdag apart zichtbaar). */
 export function regels(c: BrutoComponenten): LoonRegel[] {
   const r: LoonRegel[] = [
