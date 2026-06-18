@@ -4,6 +4,7 @@
  */
 import { LOONTABEL_2026, TOESLAGEN, OVERIG } from "./config";
 import { feestdagNaam } from "./holidays";
+import { periode, periodeIndexVoor } from "./periods";
 import type { Dienst, DienstLoon, LoonRegel, BrutoInvoer, Geboortedatum, Loongegevens } from "./types";
 
 const MS_UUR = 3600000;
@@ -27,10 +28,16 @@ export function leeftijdOp(datum: Date, geboortedatum: Geboortedatum): number {
  * functiejaren. Onder 21 telt de leeftijd (jeugdloon, functiejaren genegeerd);
  * vanaf 21 telt het functiejaar. Valt terug op de dichtstbijzijnde bekende
  * jeugdleeftijd binnen de schaal als een leeftijd niet in de tabel staat.
+ *
+ * De leeftijd wordt bepaald op het EIND van de 4-weken-periode waarin de datum
+ * valt: word je ergens in een periode jarig, dan geldt het nieuwe (jeugd)loon
+ * voor de hele periode — niet pas vanaf de verjaardag. Zo betaalt de werkgever
+ * het ook (geverifieerd op de loonstrook van de periode rond verjaardag 16 mei).
  */
 export function uurloonVoorDatum(datum: Date, loon: Loongegevens): number {
   const tabel = LOONTABEL_2026[loon.schaal];
-  const leeftijd = leeftijdOp(datum, loon.geboortedatum);
+  const periodeEind = periode(periodeIndexVoor(datum)).eind;
+  const leeftijd = leeftijdOp(periodeEind, loon.geboortedatum);
 
   if (leeftijd >= 21) {
     const fj = Math.max(0, Math.min(Math.floor(loon.functiejaren), tabel.vanaf21.length - 1));
