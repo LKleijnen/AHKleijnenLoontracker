@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { parseRooster } from "@/lib/ical";
+import { parseRooster, normaliseerIcalUrl } from "@/lib/ical";
 import { naarRuw } from "@/lib/diensten";
 
 export const runtime = "nodejs";
@@ -7,10 +7,13 @@ export const dynamic = "force-dynamic";
 
 /** Alleen https naar personeelstool.nl toestaan (mitigeert SSRF/misbruik). */
 function veiligeIcalUrl(ruw: unknown): string | null {
-  if (typeof ruw !== "string" || ruw.trim() === "") return null;
+  if (typeof ruw !== "string") return null;
+  // Zet webcal://, ical:// e.d. eerst om naar https.
+  const genormaliseerd = normaliseerIcalUrl(ruw);
+  if (genormaliseerd === "") return null;
   let url: URL;
   try {
-    url = new URL(ruw.trim());
+    url = new URL(genormaliseerd);
   } catch {
     return null;
   }

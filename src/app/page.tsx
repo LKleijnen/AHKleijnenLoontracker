@@ -5,6 +5,7 @@ import type { PeriodeUit, DienstUit, Tarieven } from "@/lib/overview";
 import { bouwOverzicht } from "@/lib/overview";
 import type { Instellingen, Geboortedatum, RuweDienst, Dienst, Loongegevens } from "@/lib/types";
 import { naarDienst, overlapt } from "@/lib/diensten";
+import { normaliseerIcalUrl } from "@/lib/ical";
 import { actieveDienst, liveLoon } from "@/lib/live";
 import { SCHAAL_INFO, type Schaal } from "@/lib/config";
 import { useFirebaseAuth, type FirebaseAuth } from "@/lib/auth";
@@ -73,7 +74,8 @@ function leeftijdNu(g: Geboortedatum): number {
   return l;
 }
 function geldigeIcalUrl(url: string): boolean {
-  return /^https:\/\/[^\s/]*personeelstool\.nl\//i.test(url.trim());
+  // webcal:// / ical:// e.d. eerst omzetten, daarna pas valideren.
+  return /^https:\/\/[^\s/]*personeelstool\.nl\//i.test(normaliseerIcalUrl(url));
 }
 
 export default function Page() {
@@ -346,7 +348,7 @@ function Onboarding({ onKlaar, auth }: { onKlaar: (i: Instellingen) => void; aut
       geboortedatum: geb!,
       schaal: schaal as Schaal,
       functiejaren: toonFunctiejaren ? functiejaren : 0,
-      icalUrl: icalUrl.trim(),
+      icalUrl: normaliseerIcalUrl(icalUrl),
     });
   }
 
@@ -655,7 +657,7 @@ function InstellingenModal({
       geboortedatum: geb,
       schaal,
       functiejaren: toonFunctiejaren ? functiejaren : 0,
-      icalUrl: icalUrl.trim(),
+      icalUrl: normaliseerIcalUrl(icalUrl),
     });
   }
 

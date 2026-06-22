@@ -5,6 +5,24 @@
  */
 import type { Dienst } from "./types";
 
+/**
+ * Zet een rooster-link om naar een bruikbare https-URL. Personeelstool levert de
+ * kalender vaak als een abonneer-link (`webcal://`, `ical://`, soms zonder
+ * protocol). Browsers en agenda-apps openen die prima, maar voor het server-side
+ * ophalen hebben we https nodig — voorheen moest dat handmatig worden aangepast.
+ * Onbekende of lege invoer komt (getrimd) ongewijzigd terug.
+ */
+export function normaliseerIcalUrl(ruw: string): string {
+  const schoon = ruw.trim();
+  if (schoon === "") return "";
+  // Bekende kalender-schemes (en kale http) → https.
+  const metHttps = schoon.replace(/^(webcals?|icals?|http):\/\//i, "https://");
+  if (metHttps !== schoon) return metHttps;
+  // Helemaal geen protocol (bijv. "ahvalkenburg.personeelstool.nl/…") → https ervoor.
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(schoon)) return "https://" + schoon;
+  return schoon;
+}
+
 function veld(blok: string, naam: string): string {
   const m = blok.match(new RegExp("^" + naam + "[^:\\r\\n]*:(.*)$", "m"));
   return m ? m[1].trim() : "";
