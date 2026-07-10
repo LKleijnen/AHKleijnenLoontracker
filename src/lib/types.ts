@@ -80,4 +80,6 @@ export interface BrutoInvoer {
   zondagUren: number;
   feestdagUren: number;
   avondUren: number;
+  /** Personeelstoeslag per gewerkt uur (€2,00 t/m de periode van je 20e, anders 0). */
+  personeelstoeslagPerUur: number;
 }

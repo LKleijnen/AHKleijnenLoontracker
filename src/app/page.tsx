@@ -1100,7 +1100,9 @@ function TarievenKaart({ t }: { t: Tarieven }) {
 
       <div className="mb-2 mt-4 text-sm font-semibold text-ah-dark">
         All-in per uur{" "}
-        <span className="font-normal text-slate-400">incl. personeelstoeslag, vakantiegeld &amp; ATV</span>
+        <span className="font-normal text-slate-400">
+          incl. {t.personeelstoeslagPerUur > 0 ? "personeelstoeslag, " : ""}vakantiegeld &amp; ATV
+        </span>
       </div>
       <div className="grid grid-cols-3 gap-2 text-center">
         <Tarief label="Normaal" waarde={t.allIn} accent />

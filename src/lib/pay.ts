@@ -2,7 +2,8 @@
  * Reken-engine: zet uren + uurloon om in bruto-loon met volledige opbouw.
  * Reproduceert de loonstroken exact (zie scripts/validate.ts).
  */
-import { LOONTABEL_2026, TOESLAGEN, OVERIG } from "./config";
+import { LOONTABELLEN, TOESLAGEN, OVERIG } from "./config";
+import type { Loonschaaltabel, Schaal } from "./config";
 import { feestdagNaam } from "./holidays";
 import { periode, periodeIndexVoor } from "./periods";
 import type { Dienst, DienstLoon, LoonRegel, BrutoInvoer, Geboortedatum, Loongegevens } from "./types";
@@ -23,6 +24,28 @@ export function leeftijdOp(datum: Date, geboortedatum: Geboortedatum): number {
   return leeftijd;
 }
 
+/** Kies de loontabel die op `datum` van kracht is (nieuwste `vanaf` ≤ datum). */
+function loontabelVoor(datum: Date, schaal: Schaal): Loonschaaltabel {
+  let gekozen = LOONTABELLEN[0];
+  for (const v of LOONTABELLEN) {
+    if (new Date(`${v.vanaf}T00:00:00`) <= datum) gekozen = v;
+  }
+  return gekozen.tabel[schaal];
+}
+
+/**
+ * Krijgt de werknemer op `datum` nog de €2/uur personeelstoeslag?
+ * CAO-regel: van je 16e t/m de AH 4-weken-periode waarin je 20 wordt; daarna niet meer.
+ * De grens ligt op de periode van de verjaardag (niet de losse datum), net als bij het
+ * uurloon — geverifieerd: de periode t/m 17 mei kreeg hem nog, de periode erna €0.
+ */
+export function personeelstoeslagActief(datum: Date, geboortedatum: Geboortedatum): boolean {
+  const { jaar, maand, dag } = geboortedatum;
+  const verjaardag = (n: number) => new Date(jaar + n, maand - 1, dag);
+  const idx = periodeIndexVoor(datum);
+  return idx >= periodeIndexVoor(verjaardag(16)) && idx <= periodeIndexVoor(verjaardag(20));
+}
+
 /**
  * Uurloon op een datum volgens de CAO-tabel, op basis van schaal, leeftijd en
  * functiejaren. Onder 21 telt de leeftijd (jeugdloon, functiejaren genegeerd);
@@ -35,8 +58,8 @@ export function leeftijdOp(datum: Date, geboortedatum: Geboortedatum): number {
  * het ook (geverifieerd op de loonstrook van de periode rond verjaardag 16 mei).
  */
 export function uurloonVoorDatum(datum: Date, loon: Loongegevens): number {
-  const tabel = LOONTABEL_2026[loon.schaal];
   const periodeEind = periode(periodeIndexVoor(datum)).eind;
+  const tabel = loontabelVoor(periodeEind, loon.schaal);
   const leeftijd = leeftijdOp(periodeEind, loon.geboortedatum);
 
   if (leeftijd >= 21) {
@@ -67,9 +90,9 @@ export interface BrutoComponenten {
 
 /** Onafgeronde componenten voor één set uren. */
 export function componenten(invoer: BrutoInvoer): BrutoComponenten {
-  const { gewerkteUren, uurloon, zondagUren, feestdagUren, avondUren } = invoer;
+  const { gewerkteUren, uurloon, zondagUren, feestdagUren, avondUren, personeelstoeslagPerUur } = invoer;
   const basisloon = gewerkteUren * uurloon;
-  const personeelstoeslag = gewerkteUren * TOESLAGEN.personeelstoeslagPerUur;
+  const personeelstoeslag = gewerkteUren * personeelstoeslagPerUur;
   return {
     uurloon,
     gewerkteUren,
@@ -137,8 +160,11 @@ export function brutoRuw(c: BrutoComponenten): number {
 export function regels(c: BrutoComponenten): LoonRegel[] {
   const r: LoonRegel[] = [
     { key: "basisloon", label: "Basisloon", bedrag: round2(c.basisloon), uren: c.gewerkteUren, toelichting: `${c.gewerkteUren} u × €${c.uurloon.toFixed(2)}` },
-    { key: "personeelstoeslag", label: "Personeelstoeslag", bedrag: round2(c.personeelstoeslag), toelichting: `€${TOESLAGEN.personeelstoeslagPerUur.toFixed(2)} per gewerkt uur` },
   ];
+  if (c.personeelstoeslag > 0) {
+    const perUur = c.gewerkteUren > 0 ? c.personeelstoeslag / c.gewerkteUren : 0;
+    r.push({ key: "personeelstoeslag", label: "Personeelstoeslag", bedrag: round2(c.personeelstoeslag), toelichting: `€${perUur.toFixed(2)} per gewerkt uur` });
+  }
   if (c.zondagtoeslag > 0) r.push({ key: "zondag", label: "Zondagtoeslag (+50%)", bedrag: round2(c.zondagtoeslag) });
   if (c.feestdagtoeslag > 0) r.push({ key: "feestdag", label: "Feestdagtoeslag (+100%)", bedrag: round2(c.feestdagtoeslag) });
   if (c.avondtoeslag > 0) r.push({ key: "avond", label: "Avondtoeslag na 22:00 (+50%)", bedrag: round2(c.avondtoeslag) });
@@ -186,7 +212,10 @@ export function bucketsVoorDienst(dienst: Dienst, loon: Loongegevens): DienstBuc
   } else {
     avondUren = Math.min(gewerkteUren, urenNaGrens(dienst, TOESLAGEN.avondGrensUur));
   }
-  return { gewerkteUren, uurloon, zondagUren, feestdagUren, avondUren, isZondag, isFeestdag, feestdagNaam: fdNaam };
+  const personeelstoeslagPerUur = personeelstoeslagActief(datum, loon.geboortedatum)
+    ? TOESLAGEN.personeelstoeslagPerUur
+    : 0;
+  return { gewerkteUren, uurloon, zondagUren, feestdagUren, avondUren, personeelstoeslagPerUur, isZondag, isFeestdag, feestdagNaam: fdNaam };
 }
 
 export function componentenVoorDienst(dienst: Dienst, loon: Loongegevens): BrutoComponenten {
