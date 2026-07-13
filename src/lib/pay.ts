@@ -58,6 +58,9 @@ export function personeelstoeslagActief(datum: Date, geboortedatum: Geboortedatu
  * het ook (geverifieerd op de loonstrook van de periode rond verjaardag 16 mei).
  */
 export function uurloonVoorDatum(datum: Date, loon: Loongegevens): number {
+  // Eigen basisuurloon ingevuld? Dan de CAO-tabel negeren en dit bedrag gebruiken.
+  if (loon.customUurloon != null && loon.customUurloon > 0) return loon.customUurloon;
+
   const periodeEind = periode(periodeIndexVoor(datum)).eind;
   const tabel = loontabelVoor(periodeEind, loon.schaal);
   const leeftijd = leeftijdOp(periodeEind, loon.geboortedatum);
@@ -91,6 +94,7 @@ export interface BrutoComponenten {
 /** Onafgeronde componenten voor één set uren. */
 export function componenten(invoer: BrutoInvoer): BrutoComponenten {
   const { gewerkteUren, uurloon, zondagUren, feestdagUren, avondUren, personeelstoeslagPerUur } = invoer;
+  const zondagPct = invoer.zondagPct ?? TOESLAGEN.zondagPct;
   const basisloon = gewerkteUren * uurloon;
   const personeelstoeslag = gewerkteUren * personeelstoeslagPerUur;
   return {
@@ -98,7 +102,7 @@ export function componenten(invoer: BrutoInvoer): BrutoComponenten {
     gewerkteUren,
     basisloon,
     personeelstoeslag,
-    zondagtoeslag: zondagUren * uurloon * TOESLAGEN.zondagPct,
+    zondagtoeslag: zondagUren * uurloon * zondagPct,
     feestdagtoeslag: feestdagUren * uurloon * TOESLAGEN.feestdagPct,
     avondtoeslag: avondUren * uurloon * TOESLAGEN.avondPct,
     vakantietoeslag: basisloon * TOESLAGEN.vakantietoeslagPct,
@@ -157,7 +161,7 @@ export function brutoRuw(c: BrutoComponenten): number {
 }
 
 /** Uitklapbare opbouw-regels voor weergave (zondag/feestdag apart zichtbaar). */
-export function regels(c: BrutoComponenten): LoonRegel[] {
+export function regels(c: BrutoComponenten, zondagPct: number = TOESLAGEN.zondagPct): LoonRegel[] {
   const r: LoonRegel[] = [
     { key: "basisloon", label: "Basisloon", bedrag: round2(c.basisloon), uren: c.gewerkteUren, toelichting: `${c.gewerkteUren} u × €${c.uurloon.toFixed(2)}` },
   ];
@@ -165,7 +169,7 @@ export function regels(c: BrutoComponenten): LoonRegel[] {
     const perUur = c.gewerkteUren > 0 ? c.personeelstoeslag / c.gewerkteUren : 0;
     r.push({ key: "personeelstoeslag", label: "Personeelstoeslag", bedrag: round2(c.personeelstoeslag), toelichting: `€${perUur.toFixed(2)} per gewerkt uur` });
   }
-  if (c.zondagtoeslag > 0) r.push({ key: "zondag", label: "Zondagtoeslag (+50%)", bedrag: round2(c.zondagtoeslag) });
+  if (c.zondagtoeslag > 0) r.push({ key: "zondag", label: `Zondagtoeslag (+${Math.round(zondagPct * 100)}%)`, bedrag: round2(c.zondagtoeslag) });
   if (c.feestdagtoeslag > 0) r.push({ key: "feestdag", label: "Feestdagtoeslag (+100%)", bedrag: round2(c.feestdagtoeslag) });
   if (c.avondtoeslag > 0) r.push({ key: "avond", label: "Avondtoeslag na 22:00 (+50%)", bedrag: round2(c.avondtoeslag) });
   r.push(
@@ -208,14 +212,20 @@ export function bucketsVoorDienst(dienst: Dienst, loon: Loongegevens): DienstBuc
   if (isFeestdag) {
     feestdagUren = gewerkteUren; // hele feestdag-dienst dubbel
   } else if (isZondag) {
-    zondagUren = gewerkteUren; // hele zondag +50% (uren na 22:00 ook 50%, geen dubbeltelling)
+    // De zondaguren tot 22:00 krijgen de (instelbare) zondagtoeslag; de uren ná
+    // 22:00 blijven altijd op +50% (onregelmatig), ook als zondag dubbel telt.
+    // Bij de standaard +50% is dit identiek aan de hele zondag op +50%.
+    const na22 = Math.min(gewerkteUren, urenNaGrens(dienst, TOESLAGEN.avondGrensUur));
+    zondagUren = gewerkteUren - na22;
+    avondUren = na22;
   } else {
     avondUren = Math.min(gewerkteUren, urenNaGrens(dienst, TOESLAGEN.avondGrensUur));
   }
   const personeelstoeslagPerUur = personeelstoeslagActief(datum, loon.geboortedatum)
     ? TOESLAGEN.personeelstoeslagPerUur
     : 0;
-  return { gewerkteUren, uurloon, zondagUren, feestdagUren, avondUren, personeelstoeslagPerUur, isZondag, isFeestdag, feestdagNaam: fdNaam };
+  const zondagPct = loon.zondagDubbel ? TOESLAGEN.feestdagPct : TOESLAGEN.zondagPct;
+  return { gewerkteUren, uurloon, zondagUren, feestdagUren, avondUren, personeelstoeslagPerUur, zondagPct, isZondag, isFeestdag, feestdagNaam: fdNaam };
 }
 
 export function componentenVoorDienst(dienst: Dienst, loon: Loongegevens): BrutoComponenten {
@@ -230,7 +240,7 @@ export function loonVoorDienst(dienst: Dienst, loon: Loongegevens): DienstLoon {
     dienst, datum: dienst.start, uurloon: b.uurloon, gewerkteUren: b.gewerkteUren,
     zondagUren: b.zondagUren, feestdagUren: b.feestdagUren, avondUren: b.avondUren,
     isZondag: b.isZondag, isFeestdag: b.isFeestdag, feestdagNaam: b.feestdagNaam,
-    regels: regels(c),
+    regels: regels(c, b.zondagPct),
     bruto: brutoAfgerond(c),
     maaltijdvergoeding: maaltijd,
   };

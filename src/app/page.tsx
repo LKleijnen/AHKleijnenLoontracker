@@ -643,6 +643,11 @@ function InstellingenModal({
   const [schaal, setSchaal] = useState<Schaal>(huidig.schaal);
   const [functiejaren, setFunctiejaren] = useState(huidig.functiejaren);
   const [icalUrl, setIcalUrl] = useState(huidig.icalUrl);
+  const [customAan, setCustomAan] = useState(!!huidig.customUurloon && huidig.customUurloon > 0);
+  const [customUurloon, setCustomUurloon] = useState(
+    huidig.customUurloon ? String(huidig.customUurloon).replace(".", ",") : "",
+  );
+  const [zondagDubbel, setZondagDubbel] = useState(!!huidig.zondagDubbel);
   const [fout, setFout] = useState("");
 
   const geb = naarGeboortedatum(gebISO);
@@ -653,11 +658,21 @@ function InstellingenModal({
     setFout("");
     if (!geb) return setFout("Vul een geldige geboortedatum in.");
     if (!geldigeIcalUrl(icalUrl)) return setFout("Plak de https-link van personeelstool.nl.");
+    let customBedrag: number | undefined;
+    if (customAan) {
+      const parsed = parseFloat(customUurloon.replace(",", "."));
+      if (!isFinite(parsed) || parsed <= 0) {
+        return setFout("Vul een geldig eigen basisuurloon in (bijv. 11,99).");
+      }
+      customBedrag = Math.round(parsed * 100) / 100;
+    }
     onOpslaan({
       geboortedatum: geb,
       schaal,
       functiejaren: toonFunctiejaren ? functiejaren : 0,
       icalUrl: normaliseerIcalUrl(icalUrl),
+      customUurloon: customBedrag,
+      zondagDubbel,
     });
   }
 
@@ -749,6 +764,61 @@ function InstellingenModal({
             )}
           </div>
         )}
+
+        <details className="border-t border-slate-100 pt-3">
+          <summary className="cursor-pointer list-none text-sm font-semibold text-slate-700">
+            <span className="text-slate-400">▸</span> Geavanceerde instellingen
+          </summary>
+          <div className="mt-3 space-y-4">
+            <div className="space-y-2">
+              <label className="flex items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  checked={customAan}
+                  onChange={(e) => setCustomAan(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-ah-blue"
+                />
+                <span>
+                  <span className="block text-sm font-medium text-slate-700">Eigen basisuurloon gebruiken</span>
+                  <span className="block text-xs leading-relaxed text-slate-500">
+                    Klopt je uurloon niet met de CAO-tabel? Vul dan zelf je bruto basisuurloon (excl.
+                    toeslagen) in. Dit vervangt het loon op basis van schaal, leeftijd en functiejaren.
+                  </span>
+                </span>
+              </label>
+              {customAan && (
+                <div className="flex items-center gap-2 pl-7">
+                  <span className="text-sm text-slate-500">€</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={customUurloon}
+                    onChange={(e) => setCustomUurloon(e.target.value)}
+                    placeholder="11,99"
+                    className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-ah-blue"
+                  />
+                  <span className="text-xs text-slate-400">per uur</span>
+                </div>
+              )}
+            </div>
+
+            <label className="flex items-start gap-2.5">
+              <input
+                type="checkbox"
+                checked={zondagDubbel}
+                onChange={(e) => setZondagDubbel(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-ah-blue"
+              />
+              <span>
+                <span className="block text-sm font-medium text-slate-700">Zondag dubbel uitbetaald</span>
+                <span className="block text-xs leading-relaxed text-slate-500">
+                  Zondaguren tellen dan als +100% (net als een feestdag) i.p.v. de standaard +50%.
+                  Onregelmatige uren ná 22:00 blijven altijd op +50%.
+                </span>
+              </span>
+            </label>
+          </div>
+        </details>
 
         {fout && <div className="text-sm text-red-600">{fout}</div>}
 
@@ -1094,7 +1164,7 @@ function TarievenKaart({ t }: { t: Tarieven }) {
       <div className="mb-2 text-sm font-semibold text-slate-700">Uurloon (basis + toeslag)</div>
       <div className="grid grid-cols-3 gap-2 text-center">
         <Tarief label="Basis" waarde={t.uurloon} />
-        <Tarief label="Zondag" waarde={t.zondag} sub="+50%" />
+        <Tarief label="Zondag" waarde={t.zondag} sub={`+${Math.round(t.zondagPct * 100)}%`} />
         <Tarief label="Feestdag" waarde={t.feestdag} sub="+100%" />
       </div>
 

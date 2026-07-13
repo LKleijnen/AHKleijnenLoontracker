@@ -58,6 +58,7 @@ export interface Tarieven {
   allInZondag: number; // all-in inclusief zondagtoeslag
   allInFeestdag: number; // all-in inclusief feestdagtoeslag
   personeelstoeslagPerUur: number; // €2,00 zolang die nog geldt, anders 0
+  zondagPct: number; // zondagtoeslag-percentage (0,5 normaal, 1,0 bij "zondag dubbel")
 }
 export interface Overzicht {
   gegenereerdLabel: string;
@@ -109,21 +110,23 @@ function dienstUit(dienst: Dienst, nu: Date, loon: Loongegevens): DienstUit {
 function berekenTarieven(nu: Date, loon: Loongegevens): Tarieven {
   const uurloon = uurloonVoorDatum(nu, loon);
   const ptPerUur = personeelstoeslagActief(nu, loon.geboortedatum) ? TOESLAGEN.personeelstoeslagPerUur : 0;
+  const zondagPct = loon.zondagDubbel ? TOESLAGEN.feestdagPct : TOESLAGEN.zondagPct;
   const euroR = (x: number) => Math.round(x * 100 + 1e-6) / 100; // centen-veilig
   // All-in per uur = alle bruto-componenten samen voor één gewerkt uur.
   const allInVoor = (zondagUren: number, feestdagUren: number) => {
-    const c = componenten({ gewerkteUren: 1, uurloon, zondagUren, feestdagUren, avondUren: 0, personeelstoeslagPerUur: ptPerUur });
+    const c = componenten({ gewerkteUren: 1, uurloon, zondagUren, feestdagUren, avondUren: 0, personeelstoeslagPerUur: ptPerUur, zondagPct });
     return c.basisloon + c.personeelstoeslag + c.zondagtoeslag + c.feestdagtoeslag +
       c.avondtoeslag + c.vakantietoeslag + c.vakantiedagen + c.atv;
   };
   return {
     uurloon: euroR(uurloon),
-    zondag: euroR(uurloon * (1 + TOESLAGEN.zondagPct)),
+    zondag: euroR(uurloon * (1 + zondagPct)),
     feestdag: euroR(uurloon * (1 + TOESLAGEN.feestdagPct)),
     allIn: euroR(allInVoor(0, 0)),
     allInZondag: euroR(allInVoor(1, 0)),
     allInFeestdag: euroR(allInVoor(0, 1)),
     personeelstoeslagPerUur: ptPerUur,
+    zondagPct,
   };
 }
 

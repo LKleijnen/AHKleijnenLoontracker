@@ -12,6 +12,18 @@ export interface Loongegevens {
   geboortedatum: Geboortedatum;
   schaal: Schaal;
   functiejaren: number; // 0 = startjaar (21+); telt niet mee onder 21
+  /**
+   * Eigen basisuurloon (excl. toeslagen) in euro. Als dit is ingevuld (> 0),
+   * overschrijft het de CAO-tabel: het uurloon volgt dan niet meer schaal,
+   * leeftijd en functiejaren maar exact dit bedrag. Geavanceerde instelling.
+   */
+  customUurloon?: number;
+  /**
+   * Zondag als dubbele dag rekenen: +100% over het basisloon (net als een
+   * feestdag) i.p.v. de standaard +50%. Geavanceerde instelling. De onregelmatige
+   * uren ná 22:00 blijven altijd op +50%, ook als dit aanstaat.
+   */
+  zondagDubbel?: boolean;
 }
 
 /** Alles wat een gebruiker invult en in localStorage bewaart. */
@@ -82,4 +94,6 @@ export interface BrutoInvoer {
   avondUren: number;
   /** Personeelstoeslag per gewerkt uur (€2,00 t/m de periode van je 20e, anders 0). */
   personeelstoeslagPerUur: number;
+  /** Zondagtoeslag-percentage over het basisloon (default 0,5; 1,0 bij "zondag dubbel"). */
+  zondagPct?: number;
 }
