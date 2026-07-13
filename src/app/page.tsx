@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { PeriodeUit, DienstUit, Tarieven } from "@/lib/overview";
 import { bouwOverzicht } from "@/lib/overview";
 import type { Instellingen, Geboortedatum, RuweDienst, Dienst, Loongegevens } from "@/lib/types";
@@ -87,6 +87,8 @@ export default function Page() {
   const [fout, setFout] = useState("");
   const [bewerken, setBewerken] = useState(false);
   const [toevoegen, setToevoegen] = useState(false);
+  const [toonHistorieHint, setToonHistorieHint] = useState(false);
+  const dienstKnopRef = useRef<HTMLButtonElement>(null);
   const auth = useFirebaseAuth();
 
   async function haalRooster(inst: Instellingen) {
@@ -193,6 +195,13 @@ export default function Page() {
     if (uid) bewaarInstellingenCloud(uid, inst).catch(() => { /* best-effort */ });
   }
 
+  // Na de onboarding: bewaar de instellingen én toon eenmalig de hint dat het
+  // rooster maar een paar weken teruggaat en oudere diensten handmatig moeten.
+  function voltooiOnboarding(inst: Instellingen) {
+    bewaar(inst);
+    setToonHistorieHint(true);
+  }
+
   // Voegt een handmatige dienst toe. Geeft een foutmelding terug, of null bij succes.
   function voegDienstToe(nieuw: RuweDienst): string | null {
     const bestaande = voegSamen(historieRuw, ruwLive ?? []).map(naarDienst);
@@ -218,7 +227,7 @@ export default function Page() {
   if (status === "init") return <Centraal>Laden…</Centraal>;
 
   if (status === "onboarding" || !instellingen) {
-    return <Onboarding onKlaar={bewaar} auth={auth} />;
+    return <Onboarding onKlaar={voltooiOnboarding} auth={auth} />;
   }
 
   const huidige = overzicht?.periodes.find((p) => p.isHuidig);
@@ -237,8 +246,11 @@ export default function Page() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setToevoegen(true)}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
+            ref={dienstKnopRef}
+            onClick={() => { setToonHistorieHint(false); setToevoegen(true); }}
+            className={`relative flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 ${
+              toonHistorieHint ? "z-50 border-ah-blue bg-white ring-2 ring-ah-blue" : "border-slate-200"
+            }`}
           >
             <PlusIcoon />
             Dienst
@@ -302,8 +314,92 @@ export default function Page() {
           onSluit={() => setToevoegen(false)}
         />
       )}
+
+      {toonHistorieHint && (
+        <HistorieHint anchorRef={dienstKnopRef} onSluit={() => setToonHistorieHint(false)} />
+      )}
     </div>
    </VerwijderDienstContext.Provider>
+  );
+}
+
+/* ---------- Historie-hint (coach-mark na de onboarding) ---------- */
+
+/**
+ * Verschijnt eenmalig zodra de onboarding klaar is. Dimt het scherm, licht de
+ * "+ Dienst"-knop uit en wijst er met een pijl naartoe: het rooster gaat maar
+ * een paar weken terug, dus oudere diensten voeg je hier handmatig toe.
+ */
+function HistorieHint({
+  anchorRef,
+  onSluit,
+}: {
+  anchorRef: { current: HTMLButtonElement | null };
+  onSluit: () => void;
+}) {
+  const [rect, setRect] = useState<DOMRect | null>(null);
+
+  useEffect(() => {
+    function meet() {
+      const el = anchorRef.current;
+      if (el) setRect(el.getBoundingClientRect());
+    }
+    meet();
+    window.addEventListener("resize", meet);
+    window.addEventListener("scroll", meet, true);
+    return () => {
+      window.removeEventListener("resize", meet);
+      window.removeEventListener("scroll", meet, true);
+    };
+  }, [anchorRef]);
+
+  if (!rect) return null;
+
+  const KAART_BREEDTE = 288; // w-72
+  const MARGE = 12;
+  const knopMidden = rect.left + rect.width / 2;
+  // Kaart rechts uitlijnen op de knop, maar binnen het scherm houden.
+  const rechts = Math.max(MARGE, window.innerWidth - rect.right);
+  const kaartLinks = window.innerWidth - rechts - KAART_BREEDTE;
+  // Pijl boven het midden van de knop, geklemd binnen de kaart.
+  const pijlLinks = Math.min(
+    KAART_BREEDTE - 24,
+    Math.max(16, knopMidden - kaartLinks),
+  );
+
+  return (
+    <div className="fixed inset-0 z-40" onClick={onSluit}>
+      <div className="absolute inset-0 bg-black/50" />
+      <div
+        className="absolute w-72 rounded-2xl bg-white p-4 shadow-xl"
+        style={{ top: rect.bottom + 14, right: rechts }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* pijltje naar de knop */}
+        <div
+          className="absolute -top-2 h-4 w-4 rotate-45 bg-white"
+          style={{ left: pijlLinks }}
+        />
+        <div className="relative space-y-2">
+          <div className="text-sm font-semibold text-slate-800">
+            Ouder dienst kwijt?
+          </div>
+          <p className="text-xs leading-relaxed text-slate-600">
+            Je rooster gaat maar een paar weken terug. Diensten van langer geleden staan
+            hier niet automatisch in. Vul je die niet zelf aan, dan ontbreken er diensten
+            van je vorige loonstrook en klopt het berekende loon niet meer met je echte
+            loonstrook. Voeg ze toe met{" "}
+            <span className="font-semibold text-ah-blue">+ Dienst</span> hierboven.
+          </p>
+          <button
+            onClick={onSluit}
+            className="mt-1 w-full rounded-lg bg-ah-blue px-3 py-2 text-sm font-semibold text-white hover:bg-ah-dark"
+          >
+            Begrepen
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
