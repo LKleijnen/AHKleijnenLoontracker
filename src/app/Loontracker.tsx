@@ -415,24 +415,28 @@ function HistorieHint({
 
   if (!rect) return null;
 
-  const KAART_BREEDTE = 288; // w-72
   const MARGE = 12;
+  // Op smalle telefoons past 288px (w-72) niet meer naast de marges: dan krimpt
+  // de kaart mee in plaats van buiten beeld te schuiven.
+  const breedte = Math.min(288, window.innerWidth - 2 * MARGE);
   const knopMidden = rect.left + rect.width / 2;
-  // Kaart rechts uitlijnen op de knop, maar binnen het scherm houden.
-  const rechts = Math.max(MARGE, window.innerWidth - rect.right);
-  const kaartLinks = window.innerWidth - rechts - KAART_BREEDTE;
+  // Kaart rechts uitlijnen op de knop, maar altijd binnen het scherm houden.
+  const kaartLinks = Math.min(
+    window.innerWidth - MARGE - breedte,
+    Math.max(MARGE, rect.right - breedte),
+  );
   // Pijl boven het midden van de knop, geklemd binnen de kaart.
   const pijlLinks = Math.min(
-    KAART_BREEDTE - 24,
-    Math.max(16, knopMidden - kaartLinks),
+    breedte - 32,
+    Math.max(16, knopMidden - kaartLinks - 8),
   );
 
   return (
     <div className="fixed inset-0 z-40" onClick={onSluit}>
       <div className="absolute inset-0 bg-black/50" />
       <div
-        className="absolute w-72 rounded-2xl bg-white p-4 shadow-xl"
-        style={{ top: rect.bottom + 14, right: rechts }}
+        className="absolute rounded-2xl bg-white p-4 shadow-xl"
+        style={{ top: rect.bottom + 14, left: kaartLinks, width: breedte }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* pijltje naar de knop */}
