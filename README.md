@@ -33,6 +33,10 @@ Bedoeld voor iedereen die in de winkel werkt: je vult éénmalig je gegevens in
   in het verleden, geen overlap met bestaande diensten. Handmatige diensten
   krijgen een "handmatig"-badge en zijn met de prullenbak weer te verwijderen.
 
+- **Demo op `/demo`** voor wie niet in de winkel werkt (portfolio/demonstratie):
+  dezelfde app op een verzonnen rooster, zonder rooster-link en zonder account.
+  Zie [Demo-modus](#demo-modus).
+
 Het uurloon komt uit de officiële LMB-loontabel **per 1 januari 2026** (schaal
 A/B/C). Geverifieerd tegen echte loonstroken: schaal C 19 jr = €10,49, 20 jr =
 €11,79 — klopt tot op de cent (`npm run validate`).
@@ -83,8 +87,11 @@ Toeslag-percentages staan in `TOESLAGEN`.
 | `src/lib/firebase.ts` | Optionele Firebase-init (alleen als env-vars gezet zijn) |
 | `src/lib/auth.ts` | `useFirebaseAuth`-hook (Google + e-mail/wachtwoord) |
 | `src/lib/historie.ts` | Voorbije diensten bewaren/laden (localStorage + Firestore) |
+| `src/lib/demo.ts` | Demo-modus: voorbeeldrooster + voorbeeldprofiel |
 | `src/app/api/rooster` | API: haalt iCal op (per gebruiker, POST) → ruwe diensten |
-| `src/app/page.tsx` | Onboarding-wizard + dashboard + account-UI |
+| `src/app/Loontracker.tsx` | Onboarding-wizard + dashboard + account-UI |
+| `src/app/page.tsx` | Route `/` — de echte app |
+| `src/app/demo/page.tsx` | Route `/demo` — dezelfde app in demo-modus |
 | `firestore.rules` | Beveiligingsregels: iedereen alleen bij eigen data |
 | `scripts/validate.ts` | Bewijst dat de engine de loonstroken reproduceert |
 
@@ -133,6 +140,33 @@ direct. Op een nieuw apparaat waar je nog ingelogd bent gebeurt dat automatisch.
 > Let op: een dienst wordt bewaard zodra je de app opent terwijl die dienst nog
 > in het ~4-weken-iCal-venster zit. Open je de app maandenlang niet, dan kan een
 > dienst tussendoor uit de bron vallen voordat hij is opgeslagen.
+
+## Demo-modus
+
+`/demo` draait exact dezelfde app, maar met een **verzonnen rooster** in plaats
+van een echte personeelstool-iCal. Bedoeld om de app te laten zien aan mensen
+die niet in de winkel werken (portfolio, sollicitatie). De route is **niet
+gelinkt** vanuit de app zelf — collega's zien er dus niets van.
+
+Wat er anders is (alles in `demo.ts` + de `demo`-vlag in `Loontracker.tsx`):
+
+- **Rooster**: `demoDiensten()` leidt ~3,7 diensten per week af uit de kalender,
+  van 2 maanden terug t/m 1 maand vooruit, plus altijd één dienst die **nú
+  bezig** is (een uur geleden begonnen, over een uur klaar) zodat de live-teller
+  draait. De diensten zijn deterministisch uit de datum afgeleid, dus het
+  rooster verspringt niet tussen bezoeken. De sjablonen raken bewust alle
+  toeslagen: late diensten na 22:00, zondagen en dienstlengtes mét pauze
+  (maaltijdvergoeding).
+- **Onboarding**: identiek, behalve stap 3 — daar staat de uitleg over de
+  iCal-link nog wél, maar zonder invulveld (de demo gebruikt hem niet). Op elke
+  stap staat een **"sla de onboarding over"**-knop die een voorbeeldprofiel
+  invult (schaal A, geboren 16-05-2006); die knop bestaat alleen in de demo.
+- **Opslag**: niets wordt bewaard. Geen `localStorage`, geen Firestore — alle
+  wijzigingen (instellingen, handmatige diensten) blijven in het geheugen van
+  het tabblad en zijn na een refresh weg. De echte app op hetzelfde apparaat
+  blijft daardoor volledig ongemoeid.
+- **Account**: uitgeschakeld (`DEMO_AUTH`), zodat demo-bezoekers geen echt
+  account aanmaken en verzonnen diensten nooit in iemands cloud belanden.
 
 ## Later (Fase 3)
 
